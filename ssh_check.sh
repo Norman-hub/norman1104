@@ -1,71 +1,88 @@
 #!/bin/bash
 
+# SSH 检测脚本（简化版）
+echo "SSH 服务检测工具"
+echo "-------------------"
+
 # 检查 SSH 服务状态
-echo "### 检查 SSH 服务状态 ###"
-ssh_status=$(systemctl status ssh 2>&1)
-if echo "$ssh_status" | grep -q "active (running)"; then
-    echo "SSH 服务正在运行。"
+echo "[+] 检查 SSH 服务状态..."
+if systemctl is-active --quiet ssh; then
+    echo "✓ SSH 服务正在运行"
 else
-    echo "SSH 服务未正常运行，状态如下："
-    echo "$ssh_status"
+    echo "✗ SSH 服务未运行"
+    echo "尝试启动 SSH 服务..."
+    if sudo systemctl start ssh; then
+        echo "✓ SSH 服务已成功启动"
+    else
+        echo "✗ 无法启动 SSH 服务，请检查配置"
+    fi
 fi
 
-# 检查 SSH 配置文件中的关键设置
-echo -e "\n### 检查 SSH 配置文件中的关键设置 ###"
+# 检查 SSH 配置文件
+echo -e "\n[+] 检查 SSH 配置文件..."
 config_file="/etc/ssh/sshd_config"
 if [ -f "$config_file" ]; then
-    # 检查 Port 设置
-    port=$(grep -i "^port" "$config_file" | awk '{print $2}' | head -n 1)
+    echo "✓ 配置文件存在: $config_file"
+    
+    # 检查关键配置项
+    echo "检查关键配置:"
+    port=$(grep -i "^Port" "$config_file" | awk '{print $2}' | head -n 1)
     if [ -z "$port" ]; then
-        port=22
-        echo "在 $config_file 中未找到 Port 设置，使用默认值 22。"
+        echo "  - Port: 默认 (22)"
     else
-        echo "SSH 服务端口设置为：$port"
+        echo "  - Port: $port"
     fi
     
-    # 检查 PermitRootLogin 设置
-    permit_root_login=$(grep -i "^permitrootlogin" "$config_file" | awk '{print $2}' | head -n 1)
-    if [ -z "$permit_root_login" ]; then
-        echo "在 $config_file 中未找到 PermitRootLogin 设置。"
+    permit_root=$(grep -i "^PermitRootLogin" "$config_file" | awk '{print $2}' | head -n 1)
+    if [ -z "$permit_root" ]; then
+        echo "  - PermitRootLogin: 默认 (no)"
     else
-        echo "PermitRootLogin 设置为：$permit_root_login"
+        echo "  - PermitRootLogin: $permit_root"
     fi
     
-    # 检查 ListenAddress 设置
-    listen_address=$(grep -i "^listenaddress" "$config_file" | awk '{print $2}' | head -n 1)
-    if [ -z "$listen_address" ]; then
-        echo "在 $config_file 中未找到 ListenAddress 设置。"
+    password_auth=$(grep -i "^PasswordAuthentication" "$config_file" | awk '{print $2}' | head -n 1)
+    if [ -z "$password_auth" ]; then
+        echo "  - PasswordAuthentication: 默认 (yes)"
     else
-        echo "ListenAddress 设置为：$listen_address"
+        echo "  - PasswordAuthentication: $password_auth"
     fi
 else
-    echo "SSH 配置文件 $config_file 不存在。"
+    echo "✗ 配置文件不存在: $config_file"
 fi
 
-# 检查防火墙状态（以 ufw 为例，若使用 iptables 可修改对应检查逻辑）
-echo -e "\n### 检查防火墙状态 ###"
-if command -v ufw &> /dev/null
-then
-    ufw_status=$(ufw status 2>&1)
-    echo "ufw 防火墙状态："
-    echo "$ufw_status"
-    if echo "$ufw_status" | grep -q "Status: active"; then
-        if echo "$ufw_status" | grep -q "22/tcp"; then
-            echo "ufw 已允许 SSH 端口（22/tcp）访问。"
+# 检查防火墙状态
+echo -e "\n[+] 检查防火墙状态..."
+if command -v ufw &> /dev/null; then
+    echo "检测到 UFW 防火墙"
+    if sudo ufw status | grep -q "Status: active"; then
+        echo "✓ UFW 已启用"
+        if sudo ufw status | grep -q "22/tcp"; then
+            echo "✓ SSH 端口 (22/tcp) 已开放"
         else
-            echo "ufw 未允许 SSH 端口（22/tcp）访问，请检查防火墙规则。"
+            echo "✗ SSH 端口 (22/tcp) 未开放"
+            echo "建议: sudo ufw allow ssh"
         fi
-    fi
-elif command -v iptables &> /dev/null
-then
-    iptables_status=$(iptables -L -n 2>&1)
-    echo "iptables 防火墙规则："
-    echo "$iptables_status"
-    if echo "$iptables_status" | grep -q "22"; then
-        echo "iptables 已允许 SSH 端口（22）访问。"
     else
-        echo "iptables 未允许 SSH 端口（22）访问，请检查防火墙规则。"
+        echo "✗ UFW 未启用"
+    fi
+elif command -v iptables &> /dev/null; then
+    echo "检测到 iptables 防火墙"
+    if sudo iptables -L | grep -q "22"; then
+        echo "✓ iptables 允许 SSH 端口 (22)"
+    else
+        echo "✗ iptables 未明确允许 SSH 端口 (22)"
+        echo "建议: sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT"
     fi
 else
-    echo "未检测到常见防火墙工具（ufw 或 iptables）。"
+    echo "未检测到常见防火墙工具"
 fi
+
+# 检查 SSH 端口监听
+echo -e "\n[+] 检查 SSH 端口监听..."
+if ss -tuln | grep -q ":22"; then
+    echo "✓ SSH 端口 (22) 正在监听"
+else
+    echo "✗ SSH 端口 (22) 未监听"
+fi
+
+echo -e "\n检测完成!"
