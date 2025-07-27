@@ -3,14 +3,14 @@ set -e
 BASE_DIR="/mnt/usbdata"
 IP=$(hostname -I | awk '{print $1}')
 
-echo "=== All-in-One 初始化脚本 v4 ==="
+echo "=== All-in-One 初始化脚本 v4.1 ==="
 
-## ------------------- 1. 目录 -------------------
+## 1. 目录
 mkdir -p $BASE_DIR/{docker,media}
 mkdir -p $BASE_DIR/media/{movies,tvshows,av,downloads}
 mkdir -p $BASE_DIR/docker/compose
 
-## ------------------- 2. 安装 Docker -------------------
+## 2. 安装 Docker（若未安装）
 if ! command -v docker &>/dev/null; then
     curl -fsSL https://get.docker.com | sh
     apt install -y docker-compose-plugin
@@ -19,16 +19,16 @@ if ! command -v docker &>/dev/null; then
     exit 0
 fi
 
-## ------------------- 3. 创建下载器独立网络 -------------------
+## 3. 创建独立下载网络
 if ! docker network ls | grep -q download_net; then
     docker network create download_net
 fi
 
-## ------------------- 4. 写入 docker-compose.yml -------------------
+## 4. 生成 docker-compose.yml
 COMPOSE_FILE="$BASE_DIR/docker/compose/docker-compose.yml"
-
 cat > $COMPOSE_FILE << EOF
 version: "3.8"
+
 services:
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
@@ -62,7 +62,7 @@ services:
     restart: unless-stopped
 
   emby:
-    image: xinjiawei233/emby-unlocked:latest
+    image: lscr.io/linuxserver/emby:latest
     container_name: emby
     environment:
       - PUID=1000
@@ -131,9 +131,9 @@ networks:
     external: true
 EOF
 
-## ------------------- 5. Dashy 配置 -------------------
+## 5. 写 Dashy 配置
 DASHY_CONF="$BASE_DIR/docker/dashy/config/conf.yml"
-mkdir -p $(dirname $DASHY_CONF)
+mkdir -p "$(dirname $DASHY_CONF)"
 cat > $DASHY_CONF << EOF
 appConfig:
   theme: nord
@@ -154,9 +154,12 @@ sections:
         icon: fas fa-bolt
   - name: 媒体服务
     items:
-      - title: Emby 开心版
+      - title: Emby
         url: http://$IP:8096
         icon: fas fa-film
+      - title: TinyMediaManager
+        url: http://$IP:5800
+        icon: fas fa-tags
   - name: 管理面板
     items:
       - title: Dashy
@@ -178,37 +181,28 @@ sections:
         icon: fas fa-chart-line
 EOF
 
-## ------------------- 6. 启动容器 -------------------
+## 6. 启动所有容器
 cd $BASE_DIR/docker/compose
 docker compose up -d
 
-## ------------------- 7. qBittorrent 移动宽带优化配置 -------------------
-echo "[调优] 优化 qBittorrent 配置 (移动宽带友好)..."
+## 7. qBittorrent 移动宽带优化
+echo "[调优] 配置 qBittorrent 适合移动宽带..."
 QBIT_CONF="$BASE_DIR/docker/qbittorrent/config/qBittorrent.conf"
-mkdir -p $(dirname $QBIT_CONF)
-
-cat > $QBIT_CONF << 'EOF'
+mkdir -p "$(dirname $QBIT_CONF)"
+cat > $QBIT_CONF << EOF
 [Preferences]
-# 限制上传速度 (150 KB/s)
-Connection\GlobalUPLimit=150
+Connection\GlobalUPLimit=150        # 上传限速 150 KB/s
 Connection\GlobalDLLimit=-1
-# 最大连接数
 Connection\MaxConnections=200
 Connection\MaxConnectionsPerTorrent=60
 Connection\MaxUploads=8
 Connection\MaxUploadsPerTorrent=4
-Connection\ResolvePeerCountries=true
-# 磁盘缓存和预分配
 Downloads\SavePath=/downloads
 Downloads\PreAllocation=true
 Downloads\DiskWriteCacheSize=256
-Downloads\UseIncompleteExtension=true
-# 队列策略
 Queueing\MaxActiveDownloads=5
 Queueing\MaxActiveTorrents=8
 Queueing\MaxActiveUploads=5
-Queueing\IgnoreSlowTorrents=true
-# 默认 BT 模式
 Bittorrent\DHT=true
 Bittorrent\PeX=true
 Bittorrent\LSD=true
@@ -218,26 +212,25 @@ WebUI\Port=8080
 WebUI\Password_PBKDF2="@ByteArray(sha256加密后的默认密码)"
 EOF
 
-## ------------------- 8. PT 模式切换脚本 -------------------
+## 8. PT/BT 切换脚本
 PT_SCRIPT="$BASE_DIR/docker/qbittorrent/config/switch-pt.sh"
 cat > $PT_SCRIPT << 'EOF'
 #!/bin/bash
 CONF="/config/qBittorrent.conf"
 if grep -q "Bittorrent\\\DHT=true" $CONF; then
-    echo "[切换] 启用 PT 模式（禁用 DHT/PEX/uTP）"
-    sed -i 's/Bittorrent\\\DHT=true/Bittorrent\\\DHT=false/' $CONF
-    sed -i 's/Bittorrent\\\PeX=true/Bittorrent\\\PeX=false/' $CONF
-    sed -i 's/Bittorrent\\\uTP=true/Bittorrent\\\uTP=false/' $CONF
+  echo "[切换] 启用 PT 模式（禁用 DHT/PEX/uTP）"
+  sed -i 's/Bittorrent\\\DHT=true/Bittorrent\\\DHT=false/' $CONF
+  sed -i 's/Bittorrent\\\PeX=true/Bittorrent\\\PeX=false/' $CONF
+  sed -i 's/Bittorrent\\\uTP=true/Bittorrent\\\uTP=false/' $CONF
 else
-    echo "[切换] 启用 BT 模式（恢复 DHT/PEX/uTP）"
-    sed -i 's/Bittorrent\\\DHT=false/Bittorrent\\\DHT=true/' $CONF
-    sed -i 's/Bittorrent\\\PeX=false/Bittorrent\\\PeX=true/' $CONF
-    sed -i 's/Bittorrent\\\uTP=false/Bittorrent\\\uTP=true/' $CONF
+  echo "[切换] 启用 BT 模式（恢复 DHT/PEX/uTP）"
+  sed -i 's/Bittorrent\\\DHT=false/Bittorrent\\\DHT=true/' $CONF
+  sed -i 's/Bittorrent\\\PeX=false/Bittorrent\\\PeX=true/' $CONF
+  sed -i 's/Bittorrent\\\uTP=false/Bittorrent\\\uTP=true/' $CONF
 fi
-echo "[完成] 请重启 qbittorrent 容器生效: docker restart qbittorrent"
+echo "[完成] 重启容器生效：docker restart qbittorrent"
 EOF
-chmod +x $PT_SCRIPT
+chmod +x "$PT_SCRIPT"
 
-echo "=== 部署完成！访问 Dashy: http://$IP:8081 ==="
-echo "[注意] qBittorrent 已优化，上传限制 150 KB/s，BT 模式默认启用"
-echo "切换 PT/BT 模式命令： docker exec -it qbittorrent bash /config/switch-pt.sh"
+echo "=== 部署完成！访问 Dashy http://$IP:8081，Emby http://$IP:8096 ==="
+echo "切换 PT/BT 模式：docker exec -it qbittorrent bash /config/switch-pt.sh"
