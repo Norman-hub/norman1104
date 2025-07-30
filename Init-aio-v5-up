@@ -420,13 +420,53 @@ cd "$COMPOSE_DIR"
 docker compose up -d
 
 # ---------------------------------------------------------------------------- #
-# 8. qBittorrent 优化配置
+# 8. qBittorrent 优化配置 移动宽带优化
 # ---------------------------------------------------------------------------- #
-# 保留原有配置逻辑
-
+echo "[调优] 配置 qBittorrent 适合移动宽带..."
+QBIT_CONF="$BASE_DIR/docker/qbittorrent/config/qBittorrent.conf"
+mkdir -p "$(dirname $QBIT_CONF)"
+cat > $QBIT_CONF << EOF
+[Preferences]
+Connection\GlobalUPLimit=150        # 上传限速 150 KB/s
+Connection\GlobalDLLimit=-1
+Connection\MaxConnections=200
+Connection\MaxConnectionsPerTorrent=60
+Connection\MaxUploads=8
+Connection\MaxUploadsPerTorrent=4
+Downloads\SavePath=/downloads
+Downloads\PreAllocation=true
+Downloads\DiskWriteCacheSize=256
+Queueing\MaxActiveDownloads=5
+Queueing\MaxActiveTorrents=8
+Queueing\MaxActiveUploads=5
+Bittorrent\DHT=true
+Bittorrent\PeX=true
+Bittorrent\LSD=true
+Bittorrent\uTP=true
+Bittorrent\AnnounceToAllTrackers=true
+WebUI\Port=8080
+WebUI\Password_PBKDF2="@ByteArray(sha256加密后的默认密码)"
+EOF
 # ---------------------------------------------------------------------------- #
 # 9. PT/BT 切换脚本
 # ---------------------------------------------------------------------------- #
-# 保留原有 switch-pt.sh
+PT_SCRIPT="$BASE_DIR/docker/qbittorrent/config/switch-pt.sh"
+cat > $PT_SCRIPT << 'EOF'
+#!/bin/bash
+CONF="/config/qBittorrent.conf"
+if grep -q "Bittorrent\\\DHT=true" $CONF; then
+  echo "[切换] 启用 PT 模式（禁用 DHT/PEX/uTP）"
+  sed -i 's/Bittorrent\\\DHT=true/Bittorrent\\\DHT=false/' $CONF
+  sed -i 's/Bittorrent\\\PeX=true/Bittorrent\\\PeX=false/' $CONF
+  sed -i 's/Bittorrent\\\uTP=true/Bittorrent\\\uTP=false/' $CONF
+else
+  echo "[切换] 启用 BT 模式（恢复 DHT/PEX/uTP）"
+  sed -i 's/Bittorrent\\\DHT=false/Bittorrent\\\DHT=true/' $CONF
+  sed -i 's/Bittorrent\\\PeX=false/Bittorrent\\\PeX=true/' $CONF
+  sed -i 's/Bittorrent\\\uTP=false/Bittorrent\\\uTP=true/' $CONF
+fi
+echo "[完成] 重启容器生效：docker restart qbittorrent"
+EOF
+chmod +x "$PT_SCRIPT"
 
 log "脚本执行完毕！请根据标注处修改域名和 ADMIN_TOKEN 后重启相关服务。"
