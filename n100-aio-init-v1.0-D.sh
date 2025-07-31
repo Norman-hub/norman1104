@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# N100 All-in-One 初始化脚本 简化修复版
-# 解决：log函数未定义、终端设置冲突问题
+# N100 All-in-One 初始化脚本 最终修复版
+# 解决：awk语法错误、编码问题、log函数调用问题
 # ================================================
 
 set -euo pipefail
@@ -12,7 +12,7 @@ log() { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
-# 2. 定义功能函数（不包含任何终端设置）
+# 2. 定义功能函数
 display_help() {
   cat <<EOF
 使用方法: $0 [选项]
@@ -42,13 +42,22 @@ env_check() {
   esac
   log "Debian $VERSION_ID ($CODENAME)"
   
+  # 修复awk命令中的引号问题（使用英文双引号）
   avail_kb=$(df --output=avail "$BASE_DIR" 2>/dev/null | tail -1 || df --output=avail / | tail -1)
-  (( avail_kb < 5*1024*1024 )) && error "磁盘可用空间不足5GB" && exit 1
+  if (( avail_kb < 5*1024*1024 )); then
+    error "磁盘可用空间不足5GB"
+    exit 1
+  fi
   
   mem_mb=$(free -m | awk '/^Mem:/ {print $2}')
-  (( mem_mb < 1024 )) && error "内存不足1GB" && exit 1
+  if (( mem_mb < 1024 )); then
+    error "内存不足1GB"
+    exit 1
+  fi
   
-  log "环境检测通过: 磁盘 $(awk "BEGIN{printf '%.1fGB', $avail_kb/1024/1024}" ), 内存 ${mem_mb}MB"
+  # 修复磁盘空间计算的awk语法（使用正确的引号和表达式）
+  disk_gb=$(echo "scale=1; $avail_kb / 1024 / 1024" | bc)
+  log "环境检测通过: 磁盘 ${disk_gb}GB, 内存 ${mem_mb}MB"
 }
 
 create_dirs() {
@@ -209,7 +218,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 [[ "${1:-}" == "-h" ]] && display_help && exit 0
 
-# 5. 初始化操作（不包含任何终端设置）
+# 5. 初始化操作
 log "脚本启动中..."
 env_check
 create_dirs
