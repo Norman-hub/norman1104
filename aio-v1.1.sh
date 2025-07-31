@@ -1,86 +1,14 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------- #
-# 磁盘分区 & 挂载 / Disk partition
-# ---------------------------------------------------------------------------- #
-partition_disk(){
-  # Ensure parted is installed
-  if ! command -v parted &>/dev/null; then
-    log "检测到 parted 未安装，正在安装 parted..."
-    apt-get update && apt-get install -y parted
-  fi
-
-  while true; do
-    # List disks
-    lsblk -dn -o NAME,SIZE | nl
-    read -e -rp "磁盘编号 (或 q 返回): " idx
-    [[ "$idx" == "q" ]] && return
-    dev=$(lsblk -dn -o NAME | sed -n "${idx}p")
-    if [[ -z "$dev" ]]; then
-      warn "无效编号，请重新输入"
-      continue
-    fi
-    read -e -rp "确认 /dev/$dev 进行分区? [y/N]: " confirm
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-      warn "操作已取消"
-      return
-    fi
-
-    # Partition and format
-    log "正在分区 /dev/$dev"
-    parted /dev/$dev --script mklabel gpt mkpart primary ext4 0%100%
-    mkfs.ext4 /dev/${dev}1
-
-    # Mount
-    read -e -rp "请输入挂载点 (例如 /mnt/data): " mnt
-    mkdir -p "$mnt"
-    mount /dev/${dev}1 "$mnt"
-    log "挂载完成: /dev/${dev}1 -> $mnt"
-    return
-  done
-}
-
-# ---------------------------------------------------------------------------- #
-partition_disk(){
-  # Ensure parted is installed
-  if ! command -v parted &>/dev/null; then
-    log "检测到 parted 未安装，正在安装 parted..."
-    apt-get update && apt-get install -y parted
-  fi
-
-  while true; do
-    # List disks
-    lsblk -dn -o NAME,SIZE | nl
-    read -e -rp "磁盘编号 (或 q 返回): " idx
-    [[ "$idx" == "q" ]] && return
-    dev=$(lsblk -dn -o NAME | sed -n "${idx}p")
-    if [[ -z "$dev" ]]; then
-      warn "无效编号，请重新输入"
-      continue
-    fi
-    read -e -rp "确认 /dev/$dev 进行分区? [y/N]: " confirm
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-      warn "操作已取消"
-      return
-    fi
-    # Partition and format
-    log "正在分区 /dev/$dev"
-    parted /dev/$dev --script mklabel gpt mkpart primary ext4 0%100%
-    mkfs.ext4 /dev/${dev}1
-    # Mount
-    read -e -rp "请输入挂载点 (例如 /mnt/data): " mnt
-    mkdir -p "$mnt"
-    mount /dev/${dev}1 "$mnt"
-    log "挂载完成: /dev/${dev}1 -> $mnt"
-    return
-  done
-}
-
+# N100 All-in-One 交互式初始化脚本 v11.2
+# Interactive AIO Initialization Script for N100 Mini-PC v11.2
 # ---------------------------------------------------------------------------- #
 
 set -euo pipefail
 IFS=$'\n\t'
 
-stty sane  # 恢复输入编辑功能，确保删除键可用
+# 恢复终端输入功能以支持删除键
+stty sane
 
 # 颜色输出 / Colors
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -217,7 +145,7 @@ enable_ssh(){
     echo "启用 SSH 子菜单："
     echo "1) 安装并启用 SSH (root & 密码)"
     echo "q) 返回主菜单"
-    read -e -rp "选择: "
+    read -e -rp "选择: " s
     case "$s" in
       1)
         apt-get update && apt-get install -y openssh-server
@@ -241,20 +169,19 @@ partition_disk(){
     apt-get update && apt-get install -y parted
   fi
   while true; do
-  while true; do
     lsblk -dn -o NAME,SIZE | nl
     read -e -rp "磁盘编号 (或 q 返回): " idx
-    [[ "$idx" == "q" ]] && break
+    [[ "$idx" == "q" ]] && return
     dev=$(lsblk -dn -o NAME | sed -n "${idx}p")
-    [[ -z "$dev" ]] && { warn "无效编号"; continue; }
-    read -e -rp "确认 /dev/$dev? [y/N]: " y
-    [[ ! "$y" =~ ^[Yy]$ ]] && { warn "操作取消"; continue; }
+    if [[ -z "$dev" ]]; then warn "无效编号，请重新输入"; continue; fi
+    read -e -rp "确认 /dev/$dev 进行分区? [y/N]: " confirm
+    [[ ! "$confirm" =~ ^[Yy]$ ]] && { warn "操作已取消"; return; }
     parted /dev/$dev --script mklabel gpt mkpart primary ext4 0%100%
     mkfs.ext4 /dev/${dev}1
-    read -e -rp "挂载点 (如 /mnt/data): " mnt
+    read -e -rp "请输入挂载点 (例如 /mnt/data): " mnt
     mkdir -p "$mnt" && mount /dev/${dev}1 "$mnt"
     log "挂载完成: /dev/${dev}1 -> $mnt"
-    break
+    return
   done
 }
 
@@ -284,7 +211,7 @@ deploy_containers(){
     echo "q) 返回主菜单"
     read -e -rp "选择: " o
     case "$o" in
-      1) 网站="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml";;
+      1) URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml";;
       2) read -e -rp "输入 compose URL: " URL;;
       q) return;;
       *) warn "无效选项"; continue;;
@@ -293,7 +220,7 @@ deploy_containers(){
     curl -fsSL "$URL" -o "$COMPOSE_DIR/docker-compose.yml"
     cd "$COMPOSE_DIR" && docker compose up -d
     # 自动生成 Dashy 配置
-    CONF="$BASE_DIR/docker/dashy/config/conf.yml"; mkdir -p "$(dirname \$CONF)"
+    CONF="$BASE_DIR/docker/dashy/config/conf.yml"; mkdir -p "$(dirname "$CONF")"
     cat > "$CONF" <<EOF
 appConfig:
   theme: nord
@@ -310,7 +237,7 @@ EOF
       echo "        url: http://\$IP_ADDR:$p" >> "$CONF"
     done
     log "部署完成 & Dashy 配置生成: $CONF"
-    break
+    return
   done
 }
 
@@ -338,20 +265,23 @@ docker_one_click(){
       7)
         mapfile -t a < <(docker ps -a --format '{{.Names}}')
         for i in "${!a[@]}"; do echo "$((i+1)). ${a[i]}"; done
-        read -e -rp "日志编号: " i; docker logs "${a[i-1]}" ;;  
+        read -e -rp "日志编号: " i
+        docker logs "${a[i-1]}" 
+        ;;
       8)
         echo "挂载点: ${MOUNTS[*]}"
         read -e -rp "备份目录: " b
         mkdir -p "$b" && cp -r "$BASE_DIR/docker" "$b/"
-        log "配置备份到: $b/docker" ;;  
+        log "配置备份到: $b/docker"
+        ;;
       q) break ;;
-      *) warn "无效选项" ;;  
+      *) warn "无效选项" ;;
     esac
   done
 }
 
 # ---------------------------------------------------------------------------- #
-# 系统更新 & 日志清理
+# 系统更新 & 日志清理 / Update & Log Cleanup
 # ---------------------------------------------------------------------------- #
 update_system(){
   sed -i "s|^deb .*|deb http://deb.debian.org/debian ${CODENAME} main contrib non-free|" /etc/apt/sources.list
@@ -393,11 +323,11 @@ EOF
       read -e -rp "子菜单: " sub
       [[ "$sub" == "1" ]] && network_detect
       [[ "$sub" == "2" ]] && network_config
-      ;;  
+      ;;
     2) check_ssh_status ;; 3) enable_ssh ;; 4) partition_disk ;; 5) install_docker ;; 6) deploy_containers ;; 7) docker_one_click ;;
     8) update_system ;; 9) log_rotate ;;
     q) log "退出脚本"; break ;;
-    *) warn "无效选项" ;;  
+    *) warn "无效选项" ;;
   esac
 done
 
