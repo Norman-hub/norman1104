@@ -189,6 +189,11 @@ partition_disk(){
 # Docker 安装 / Install Docker
 # ---------------------------------------------------------------------------- #
 install_docker(){
+  # Ensure curl is installed
+  if ! command -v curl &>/dev/null; then
+    log "检测到 curl 未安装，正在安装 curl..."
+    apt-get update && apt-get install -y curl
+  fi
   if ! command -v docker &>/dev/null; then
     curl -fsSL https://get.docker.com | sh
     apt-get install -y docker-compose-plugin
@@ -202,6 +207,11 @@ install_docker(){
 # ---------------------------------------------------------------------------- #
 # 容器部署 / Deploy containers
 deploy_containers(){
+  # Ensure curl is installed
+  if ! command -v curl &>/dev/null; then
+    log "检测到 curl 未安装，正在安装 curl..."
+    apt-get update && apt-get install -y curl
+  fi
   while true; do
     mkdir -p "$COMPOSE_DIR"
     echo
