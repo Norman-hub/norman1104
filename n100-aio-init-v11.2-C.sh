@@ -249,17 +249,102 @@ deploy_containers(){
     log "下载 compose 文件: $URL"
     curl -fsSL "$URL" -o "$COMPOSE_DIR/docker-compose.yml"
     cd "$COMPOSE_DIR" && docker compose up -d
-    # 自动生成 Dashy 配置
-    CONF="$BASE_DIR/docker/dashy/config/conf.yml"; mkdir -p "$(dirname "$CONF")"
-    cat > "$CONF" <<EOF
+# ---------------------------------------------------------------------------- #
+# Dashy 配置（含 Glances 监控卡片）
+# ---------------------------------------------------------------------------- #
+log "生成 Dashy 配置至：$BASE_DIR/docker/dashy/config/conf.yml"
+cat > "$BASE_DIR/docker/dashy/config/conf.yml" <<EOF
 appConfig:
   theme: nord
   language: zh
+
 pageInfo:
-  title: AIO 控制面板
+  title: 我的 AIO 控制面板
+  description: 服务导航
+
 sections:
-  - name: 服务导航
+  - name: 下载工具
     items:
+      - title: qBittorrent
+        url: http://$IP_ADDR:8080
+        icon: fas fa-cloud-download-alt
+      - title: 迅雷
+        url: http://$IP_ADDR:2345
+        icon: fas fa-bolt
+  - name: 媒体服务
+    items:
+      - title: Emby
+        url: http://$IP_ADDR:8096
+        icon: fas fa-film
+  - name: 管理面板
+    items:
+      - title: Dashy
+        url: http://$IP_ADDR:8081
+        icon: fas fa-th
+      - title: Filebrowser
+        url: http://$IP_ADDR:8082
+        icon: fas fa-folder-open
+      - title: Nginx Proxy Manager
+        url: http://$IP_ADDR:81
+        icon: fas fa-random
+      - title: Bitwarden
+        url: http://$IP_ADDR:8083
+        icon: fas fa-key
+  - name: 系统监控
+    items:
+      - title: CPU 使用率
+        type: card
+        options:
+          data:
+            source: http://$IP_ADDR:61208/api/3/all  # === 确保 API 可用 ===
+            path: $.cpu.total
+        style:
+          icon: fas fa-microchip
+          unit: '%'
+          thresholds:
+            - value: 50
+            - value: 80
+            - value: 100
+      - title: 内存使用
+        type: card
+        options:
+          data:
+            source: http://$IP_ADDR:61208/api/3/all
+            path: $.mem.percent
+        style:
+          icon: fas fa-memory
+          unit: '%'
+          thresholds:
+            - value: 50
+            - value: 80
+            - value: 100
+      - title: 磁盘根分区使用
+        type: card
+        options:
+          data:
+            source: http://$IP_ADDR:61208/api/3/all
+            path: $.fs.mapPartitions[?(@.mountpoint=='/')].percent
+        style:
+          icon: fas fa-hdd
+          unit: '%'
+          thresholds:
+            - value: 70
+            - value: 90
+            - value: 100
+      - title: 各容器 CPU 占用
+        type: miniGraph
+        options:
+          data:
+            source: http://$IP_ADDR:61208/api/3/all
+            path: $.docker.mapContainerStats[*].cpu_percent
+        style:
+          unit: '%'
+          height: 100
+      - title: Glances 全视图
+        type: iframe
+        url: http://$IP_ADDR:61208/  # === Iframe 查看完整 Glances UI ===
+        icon: fas fa-chart-line
+        height: 500
 EOF
     for c in $(docker ps --format '{{.Names}}'); do
       p=$(docker port "$c" | head -1 | awk -F: '{print \$2}')
