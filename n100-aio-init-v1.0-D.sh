@@ -1,31 +1,25 @@
 #!/usr/bin/env bash
 # N100 All-in-One 交互式初始化脚本 v11.2 最终修复版
-# 解决：终端删除键失效问题
+# 解决：终端删除键失效、log函数未定义问题
 # ================================================
 
 set -euo pipefail
 IFS=$'\n\t'
 
-# 颜色输出与日志函数（提前定义，确保其他函数能调用）
+# 第一步：先定义所有日志函数（必须放在最前面）
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 log(){ echo -e "${GREEN}[INFO]${NC} $*"; }
 warn(){ echo -e "${YELLOW}[WARN]${NC} $*"; }
 error(){ echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
-# 【强化修复】彻底解决删除键失效问题（兼容所有终端环境）
-# 重置终端设置，确保删除键正确映射
+# 第二步：定义需要调用日志函数的函数
 reset_terminal() {
-  # 恢复标准终端设置
   stty sane
-  # 明确设置删除键为^H（Backspace）和^?（Delete）
   stty erase '^?'
-  # 确保输入模式正确
   stty -icrnl -onlcr
-  log "终端设置已重置，删除键功能已修复"  # 现在log函数已提前定义
+  log "终端设置已重置，删除键功能已修复"  # 此时log函数已定义
 }
-reset_terminal
 
-# 帮助信息
 display_help(){
   cat <<EOF
 使用方法: $0 [选项]
@@ -45,24 +39,6 @@ display_help(){
 EOF
 }
 
-# 根权限检测
-if [[ $EUID -ne 0 ]]; then
-  error "请使用 root 或 sudo 运行此脚本"
-  exit 1
-fi
-[[ "${1:-}" == "-h" ]] && display_help && exit 0
-
-# 全局变量
-BASE_DIR="/mnt/usbdata"
-COMPOSE_DIR="$BASE_DIR/docker/compose"
-MOUNTS=(/mnt/usbdata1 /mnt/usbdata2 /mnt/usbdata3)
-DEFAULT_COMPOSE_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml"
-# Dashy 配置文件路径（仅用于目录创建）
-DASHY_CONFIG_DIR="$BASE_DIR/docker/dashy/config"
-
-# ================================================
-# 环境检测
-# ================================================
 env_check(){
   . /etc/os-release
   VERSION_ID=${VERSION_ID%%.*}
@@ -73,21 +49,15 @@ env_check(){
   esac
   log "Debian $VERSION_ID ($CODENAME)"
   
-  # 磁盘空间检测
   avail_kb=$(df --output=avail "$BASE_DIR" 2>/dev/null | tail -1 || df --output=avail / | tail -1)
   (( avail_kb < 5*1024*1024 )) && error "磁盘可用空间不足5GB" && exit 1
   
-  # 内存检测
   mem_mb=$(free -m | awk '/^Mem:/ {print $2}')
   (( mem_mb < 1024 )) && error "内存不足1GB" && exit 1
   
   log "环境检测通过: 磁盘 $(awk "BEGIN{printf '%.1fGB', $avail_kb/1024/1024}" ), 内存 ${mem_mb}MB"
 }
-env_check
 
-# ================================================
-# 创建目录结构（已移除Dashy配置文件自动生成）
-# ================================================
 create_dirs(){
   log "创建目录结构：$BASE_DIR"
   mkdir -p \
@@ -103,37 +73,23 @@ create_dirs(){
     "$BASE_DIR"/media/av \
     "$BASE_DIR"/media/downloads
 }
-create_dirs
 
-# ================================================
-# IP 与域名检测
-# ================================================
 detect_ip(){
   IP_ADDR="$(hostname -I | awk '{print $1}')"
   log "本机IP: $IP_ADDR"
 }
-detect_ip
 
-read -e -rp "请输入泛域名 (如 *.example.com): " WILDCARD_DOMAIN
-log "使用域名: $WILDCARD_DOMAIN"
-
-# ================================================
-# 菜单功能实现
-# ================================================
-# 1. 网络检测与配置
 check_network() {
   log "开始网络检测..."
   ping -c 3 8.8.8.8 >/dev/null 2>&1 && log "网络连接正常" || error "网络连接失败，请检查网络设置"
 }
 
-# 2. 检查 SSH 状态与配置
 check_ssh() {
   log "检查SSH服务状态..."
   systemctl is-active --quiet ssh && log "SSH服务正在运行" || warn "SSH服务未运行"
   log "SSH端口配置: $(grep '^Port' /etc/ssh/sshd_config | awk '{print $2}')"
 }
 
-# 3. 启用 SSH (root & 密码)
 enable_ssh() {
   log "配置SSH允许root登录..."
   sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
@@ -142,7 +98,6 @@ enable_ssh() {
   log "SSH配置已更新，允许root密码登录"
 }
 
-# 4. 磁盘分区 & 挂载
 mount_disks() {
   log "开始磁盘挂载配置..."
   for mount_point in "${MOUNTS[@]}"; do
@@ -151,7 +106,6 @@ mount_disks() {
   log "磁盘挂载配置完成"
 }
 
-# 5. 安装 Docker
 install_docker() {
   log "开始安装Docker..."
   if ! command -v docker &> /dev/null; then
@@ -168,7 +122,6 @@ install_docker() {
   fi
 }
 
-# 6. 部署容器
 deploy_containers() {
   local compose_url
   while true; do
@@ -197,14 +150,12 @@ deploy_containers() {
   cd "$COMPOSE_DIR" || { error "无法进入目录 $COMPOSE_DIR"; return 1; }
   docker compose up -d
 
-  # 提示Dashy配置文件需手动处理
   if docker compose ps | grep -q "dashy"; then
     log "Dashy 容器已启动"
     log "注意：Dashy配置文件需手动创建，路径为: $DASHY_CONFIG_DIR/conf.yml"
   fi
 }
 
-# 7. Docker 一键运维
 docker_maintenance() {
   echo -e "\nDocker运维子菜单："
   echo "1) 查看容器状态"
@@ -235,7 +186,6 @@ docker_maintenance() {
   esac
 }
 
-# 8. 系统更新与升级
 system_update() {
   log "开始系统更新..."
   apt-get update && apt-get upgrade -y
@@ -243,7 +193,6 @@ system_update() {
   log "系统更新完成"
 }
 
-# 9. 日志轮转与清理
 log_rotation() {
   log "配置日志轮转..."
   apt-get install -y logrotate
@@ -253,9 +202,29 @@ log_rotation() {
   log "日志清理完成"
 }
 
-# ================================================
-# 主菜单
-# ================================================
+# 第三步：定义全局变量
+BASE_DIR="/mnt/usbdata"
+COMPOSE_DIR="$BASE_DIR/docker/compose"
+MOUNTS=(/mnt/usbdata1 /mnt/usbdata2 /mnt/usbdata3)
+DEFAULT_COMPOSE_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml"
+DASHY_CONFIG_DIR="$BASE_DIR/docker/dashy/config"
+
+# 第四步：执行初始化操作（所有函数已定义完毕）
+if [[ $EUID -ne 0 ]]; then
+  error "请使用 root 或 sudo 运行此脚本"
+  exit 1
+fi
+[[ "${1:-}" == "-h" ]] && display_help && exit 0
+
+reset_terminal
+env_check
+create_dirs
+detect_ip
+
+read -e -rp "请输入泛域名 (如 *.example.com): " WILDCARD_DOMAIN
+log "使用域名: $WILDCARD_DOMAIN"
+
+# 第五步：主菜单循环
 while true; do
   echo -e "\n====== N100 AIO 初始化 v11.2 最终修复版 ======"
   echo "1) 网络检测与配置"
