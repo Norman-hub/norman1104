@@ -145,7 +145,7 @@ enable_ssh(){
     echo "启用 SSH 子菜单："
     echo "1) 安装并启用 SSH (root & 密码)"
     echo "q) 返回主菜单"
-    read -e -rp "选择: " s
+    read -e -rp "选择: "
     case "$s" in
       1)
         apt-get update && apt-get install -y openssh-server
@@ -221,11 +221,16 @@ deploy_containers(){
     echo "q) 返回主菜单"
     read -e -rp "选择: " o
     case "$o" in
-      1) URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml";;
+      1) 网站="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml";;
       2) read -e -rp "输入 compose URL: " URL;;
       q) return;;
       *) warn "无效选项"; continue;;
     esac
+    # GitHub 页面 URL 转换至 raw
+    if [[ "$URL" =~ github\.com/.*/blob/.* ]]; then
+      网站="${URL/\/blob\//\/raw\/}"
+      log "已转换为 Raw URL: $URL"
+    fi
     log "下载 compose 文件: $URL"
     curl -fsSL "$URL" -o "$COMPOSE_DIR/docker-compose.yml"
     cd "$COMPOSE_DIR" && docker compose up -d
