@@ -1,7 +1,42 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------- #
-# N100 All-in-One 交互式初始化脚本 v11.2
-# Interactive AIO Initialization Script for N100 Mini-PC v11.2
+# 磁盘分区 & 挂载 / Disk partition
+# ---------------------------------------------------------------------------- #
+partition_disk(){
+  # Ensure parted is installed
+  if ! command -v parted &>/dev/null; then
+    log "检测到 parted 未安装，正在安装 parted..."
+    apt-get update && apt-get install -y parted
+  fi
+
+  while true; do
+    # List disks
+    lsblk -dn -o NAME,SIZE | nl
+    read -e -rp "磁盘编号 (或 q 返回): " idx
+    [[ "$idx" == "q" ]] && return
+    dev=$(lsblk -dn -o NAME | sed -n "${idx}p")
+    if [[ -z "$dev" ]]; then
+      warn "无效编号，请重新输入"
+      continue
+    fi
+    read -e -rp "确认 /dev/$dev 进行分区? [y/N]: " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+      warn "操作已取消"
+      return
+    fi
+    # Partition and format
+    log "正在分区 /dev/$dev"
+    parted /dev/$dev --script mklabel gpt mkpart primary ext4 0%100%
+    mkfs.ext4 /dev/${dev}1
+    # Mount
+    read -e -rp "请输入挂载点 (例如 /mnt/data): " mnt
+    mkdir -p "$mnt"
+    mount /dev/${dev}1 "$mnt"
+    log "挂载完成: /dev/${dev}1 -> $mnt"
+    return
+  done
+}
+
 # ---------------------------------------------------------------------------- #
 
 set -euo pipefail
