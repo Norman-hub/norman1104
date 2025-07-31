@@ -7,7 +7,7 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-# 恢复终端输入功能以支持删除键
+# 恢复终端终端输入功能以支持删除键
 stty sane
 
 # 颜色输出 / Colors
@@ -67,6 +67,21 @@ env_check(){
 }
 env_check
 
+# 新增：创建目录结构（环境检测通过后执行）
+log "创建目录结构：$BASE_DIR"
+mkdir -p \
+  "$BASE_DIR"/docker/compose \
+  "$BASE_DIR"/docker/qbittorrent/config \
+  "$BASE_DIR"/docker/dashy/config \
+  "$BASE_DIR"/docker/filebrowser/config \
+  "$BASE_DIR"/docker/bitwarden/data \
+  "$BASE_DIR"/docker/emby/config \
+  "$BASE_DIR"/docker/metatube/postgres \
+  "$BASE_DIR"/media/movies \
+  "$BASE_DIR"/media/tvshows \
+  "$BASE_DIR"/media/av \
+  "$BASE_DIR"/media/downloads
+  
 # ---------------------------------------------------------------------------- #
 # IP 与域名 / IP & Domain
 detect_ip(){
