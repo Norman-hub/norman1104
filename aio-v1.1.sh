@@ -144,7 +144,7 @@ enable_ssh(){
     echo "启用 SSH 子菜单："
     echo "1) 安装并启用 SSH (root & 密码)"
     echo "q) 返回主菜单"
-    read -e -rp "选择: "
+    read -e -rp "选择: " s
     case "$s" in
       1)
         apt-get update && apt-get install -y openssh-server
@@ -162,6 +162,12 @@ enable_ssh(){
 # 磁盘分区 & 挂载 / Disk partition
 # ---------------------------------------------------------------------------- #
 partition_disk(){
+  # Ensure parted is installed
+  if ! command -v parted &>/dev/null; then
+    log "检测到 parted 未安装，正在安装 parted..."
+    apt-get update && apt-get install -y parted
+  fi
+  while true; do
   while true; do
     lsblk -dn -o NAME,SIZE | nl
     read -e -rp "磁盘编号 (或 q 返回): " idx
@@ -205,7 +211,7 @@ deploy_containers(){
     echo "q) 返回主菜单"
     read -e -rp "选择: " o
     case "$o" in
-      1) 网站="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml";;
+      1) URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml";;
       2) read -e -rp "输入 compose URL: " URL;;
       q) return;;
       *) warn "无效选项"; continue;;
