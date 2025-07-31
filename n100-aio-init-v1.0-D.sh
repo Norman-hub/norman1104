@@ -6,6 +6,12 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# 颜色输出与日志函数（提前定义，确保其他函数能调用）
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+log(){ echo -e "${GREEN}[INFO]${NC} $*"; }
+warn(){ echo -e "${YELLOW}[WARN]${NC} $*"; }
+error(){ echo -e "${RED}[ERROR]${NC} $*" >&2; }
+
 # 【强化修复】彻底解决删除键失效问题（兼容所有终端环境）
 # 重置终端设置，确保删除键正确映射
 reset_terminal() {
@@ -15,15 +21,9 @@ reset_terminal() {
   stty erase '^?'
   # 确保输入模式正确
   stty -icrnl -onlcr
-  log "终端设置已重置，删除键功能已修复"
+  log "终端设置已重置，删除键功能已修复"  # 现在log函数已提前定义
 }
 reset_terminal
-
-# 颜色输出
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-log(){ echo -e "${GREEN}[INFO]${NC} $*"; }
-warn(){ echo -e "${YELLOW}[WARN]${NC} $*"; }
-error(){ echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 # 帮助信息
 display_help(){
@@ -93,7 +93,7 @@ create_dirs(){
   mkdir -p \
     "$BASE_DIR"/docker/compose \
     "$BASE_DIR"/docker/qbittorrent/config \
-    "$DASHY_CONFIG_DIR" \  # 仅创建目录，不生成配置文件
+    "$DASHY_CONFIG_DIR" \
     "$BASE_DIR"/docker/filebrowser/config \
     "$BASE_DIR"/docker/bitwarden/data \
     "$BASE_DIR"/docker/emby/config \
