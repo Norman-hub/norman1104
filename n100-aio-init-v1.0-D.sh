@@ -1,26 +1,19 @@
 #!/usr/bin/env bash
-# N100 All-in-One 交互式初始化脚本 v11.2 最终修复版
-# 解决：终端删除键失效、log函数未定义问题
+# N100 All-in-One 初始化脚本 简化修复版
+# 解决：log函数未定义、终端设置冲突问题
 # ================================================
 
 set -euo pipefail
 IFS=$'\n\t'
 
-# 第一步：先定义所有日志函数（必须放在最前面）
+# 1. 首先定义所有日志函数（最优先）
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-log(){ echo -e "${GREEN}[INFO]${NC} $*"; }
-warn(){ echo -e "${YELLOW}[WARN]${NC} $*"; }
-error(){ echo -e "${RED}[ERROR]${NC} $*" >&2; }
+log() { echo -e "${GREEN}[INFO]${NC} $*"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
-# 第二步：定义需要调用日志函数的函数
-reset_terminal() {
-  stty sane
-  stty erase '^?'
-  stty -icrnl -onlcr
-  log "终端设置已重置，删除键功能已修复"  # 此时log函数已定义
-}
-
-display_help(){
+# 2. 定义功能函数（不包含任何终端设置）
+display_help() {
   cat <<EOF
 使用方法: $0 [选项]
 选项:
@@ -39,7 +32,7 @@ display_help(){
 EOF
 }
 
-env_check(){
+env_check() {
   . /etc/os-release
   VERSION_ID=${VERSION_ID%%.*}
   case "$VERSION_ID" in
@@ -58,7 +51,7 @@ env_check(){
   log "环境检测通过: 磁盘 $(awk "BEGIN{printf '%.1fGB', $avail_kb/1024/1024}" ), 内存 ${mem_mb}MB"
 }
 
-create_dirs(){
+create_dirs() {
   log "创建目录结构：$BASE_DIR"
   mkdir -p \
     "$BASE_DIR"/docker/compose \
@@ -74,7 +67,7 @@ create_dirs(){
     "$BASE_DIR"/media/downloads
 }
 
-detect_ip(){
+detect_ip() {
   IP_ADDR="$(hostname -I | awk '{print $1}')"
   log "本机IP: $IP_ADDR"
 }
@@ -202,21 +195,22 @@ log_rotation() {
   log "日志清理完成"
 }
 
-# 第三步：定义全局变量
+# 3. 定义全局变量
 BASE_DIR="/mnt/usbdata"
 COMPOSE_DIR="$BASE_DIR/docker/compose"
 MOUNTS=(/mnt/usbdata1 /mnt/usbdata2 /mnt/usbdata3)
 DEFAULT_COMPOSE_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml"
 DASHY_CONFIG_DIR="$BASE_DIR/docker/dashy/config"
 
-# 第四步：执行初始化操作（所有函数已定义完毕）
+# 4. 权限检测
 if [[ $EUID -ne 0 ]]; then
   error "请使用 root 或 sudo 运行此脚本"
   exit 1
 fi
 [[ "${1:-}" == "-h" ]] && display_help && exit 0
 
-reset_terminal
+# 5. 初始化操作（不包含任何终端设置）
+log "脚本启动中..."
 env_check
 create_dirs
 detect_ip
@@ -224,9 +218,9 @@ detect_ip
 read -e -rp "请输入泛域名 (如 *.example.com): " WILDCARD_DOMAIN
 log "使用域名: $WILDCARD_DOMAIN"
 
-# 第五步：主菜单循环
+# 6. 主菜单
 while true; do
-  echo -e "\n====== N100 AIO 初始化 v11.2 最终修复版 ======"
+  echo -e "\n====== N100 AIO 初始化 简化修复版 ======"
   echo "1) 网络检测与配置"
   echo "2) 检查 SSH 状态与配置"
   echo "3) 启用 SSH (root & 密码)"
