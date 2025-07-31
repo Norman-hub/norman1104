@@ -176,7 +176,7 @@ partition_disk(){
     if [[ -z "$dev" ]]; then warn "无效编号，请重新输入"; continue; fi
     read -e -rp "确认 /dev/$dev 进行分区? [y/N]: " confirm
     [[ ! "$confirm" =~ ^[Yy]$ ]] && { warn "操作已取消"; return; }
-    parted /dev/$dev --script mklabel gpt mkpart primary ext4 0%100%
+    parted /dev/$dev --script mklabel gpt mkpart primary ext4 0% 100%
     mkfs.ext4 /dev/${dev}1
     read -e -rp "请输入挂载点 (例如 /mnt/data): " mnt
     mkdir -p "$mnt" && mount /dev/${dev}1 "$mnt"
