@@ -165,21 +165,6 @@ services:
       - /mnt/usbdata/docker/metatube/postgres:/var/lib/postgresql/data
       - run:/var/run
     command: "-c TimeZone=Asia/Shanghai -c log_timezone=Asia/Shanghai -c listen_addresses='' -c unix_socket_permissions=0777"
-  
-  # Nginx Proxy Manager：中文稳定版release 反代所有默认服务  管理端口 81
-  nginxproxymanager:
-    image: chishin/nginx-proxy-manager-zh:release
-    container_name: nginxproxymanager
-    networks:
-      - proxy_net
-    ports:
-      - "80:80"
-      - "81:81"
-      - "443:443"
-    volumes:
-      - /mnt/usbdata/docker/proxy/data:/data
-      - /mnt/usbdata/docker/proxy/letsencrypt:/etc/letsencrypt
-    restart: unless-stopped
     
   # 创建桥接网络
 networks:
