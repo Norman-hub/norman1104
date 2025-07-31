@@ -24,6 +24,44 @@ partition_disk(){
       warn "操作已取消"
       return
     fi
+
+    # Partition and format
+    log "正在分区 /dev/$dev"
+    parted /dev/$dev --script mklabel gpt mkpart primary ext4 0%100%
+    mkfs.ext4 /dev/${dev}1
+
+    # Mount
+    read -e -rp "请输入挂载点 (例如 /mnt/data): " mnt
+    mkdir -p "$mnt"
+    mount /dev/${dev}1 "$mnt"
+    log "挂载完成: /dev/${dev}1 -> $mnt"
+    return
+  done
+}
+
+# ---------------------------------------------------------------------------- #
+partition_disk(){
+  # Ensure parted is installed
+  if ! command -v parted &>/dev/null; then
+    log "检测到 parted 未安装，正在安装 parted..."
+    apt-get update && apt-get install -y parted
+  fi
+
+  while true; do
+    # List disks
+    lsblk -dn -o NAME,SIZE | nl
+    read -e -rp "磁盘编号 (或 q 返回): " idx
+    [[ "$idx" == "q" ]] && return
+    dev=$(lsblk -dn -o NAME | sed -n "${idx}p")
+    if [[ -z "$dev" ]]; then
+      warn "无效编号，请重新输入"
+      continue
+    fi
+    read -e -rp "确认 /dev/$dev 进行分区? [y/N]: " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+      warn "操作已取消"
+      return
+    fi
     # Partition and format
     log "正在分区 /dev/$dev"
     parted /dev/$dev --script mklabel gpt mkpart primary ext4 0%100%
@@ -179,7 +217,7 @@ enable_ssh(){
     echo "启用 SSH 子菜单："
     echo "1) 安装并启用 SSH (root & 密码)"
     echo "q) 返回主菜单"
-    read -e -rp "选择: " s
+    read -e -rp "选择: "
     case "$s" in
       1)
         apt-get update && apt-get install -y openssh-server
@@ -246,7 +284,7 @@ deploy_containers(){
     echo "q) 返回主菜单"
     read -e -rp "选择: " o
     case "$o" in
-      1) URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml";;
+      1) 网站="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml";;
       2) read -e -rp "输入 compose URL: " URL;;
       q) return;;
       *) warn "无效选项"; continue;;
