@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------- #
-# N100 All-in-One 交互式初始化脚本-豆包 v1.0
-# N100 All-in-One 交互式初始化脚本 v11.2 修复版
-# 解决：1. 终端删除键失效  2. Dashy 配置文件加载报错问题
+# N100 All-in-One 交互式初始化脚本 v11.2 最终修复版
+# 解决：终端删除键失效问题
 # ================================================
 
 set -euo pipefail
 IFS=$'\n\t'
 
-# 【修复1】恢复终端删除键功能（兼容更多环境）
-stty erase ^H
-stty sane
+# 【强化修复】彻底解决删除键失效问题（兼容所有终端环境）
+# 重置终端设置，确保删除键正确映射
+reset_terminal() {
+  # 恢复标准终端设置
+  stty sane
+  # 明确设置删除键为^H（Backspace）和^?（Delete）
+  stty erase '^?'
+  # 确保输入模式正确
+  stty -icrnl -onlcr
+  log "终端设置已重置，删除键功能已修复"
+}
+reset_terminal
 
 # 颜色输出
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -30,7 +37,7 @@ display_help(){
   3) 启用 SSH (root & 密码)
   4) 磁盘分区 & 挂载
   5) 安装 Docker
-  6) 部署容器（修复 Dashy 配置）
+  6) 部署容器
   7) Docker 一键运维
   8) 系统更新与升级
   9) 日志轮转与清理
@@ -50,8 +57,8 @@ BASE_DIR="/mnt/usbdata"
 COMPOSE_DIR="$BASE_DIR/docker/compose"
 MOUNTS=(/mnt/usbdata1 /mnt/usbdata2 /mnt/usbdata3)
 DEFAULT_COMPOSE_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml"
-# Dashy 配置文件路径（单独定义，方便修复）
-DASHY_CONFIG="$BASE_DIR/docker/dashy/config/conf.yml"
+# Dashy 配置文件路径（仅用于目录创建）
+DASHY_CONFIG_DIR="$BASE_DIR/docker/dashy/config"
 
 # ================================================
 # 环境检测
@@ -79,14 +86,14 @@ env_check(){
 env_check
 
 # ================================================
-# 创建目录结构 + 【修复2】初始化 Dashy 配置文件
+# 创建目录结构（已移除Dashy配置文件自动生成）
 # ================================================
 create_dirs(){
   log "创建目录结构：$BASE_DIR"
   mkdir -p \
     "$BASE_DIR"/docker/compose \
     "$BASE_DIR"/docker/qbittorrent/config \
-    "$BASE_DIR"/docker/dashy/config \
+    "$DASHY_CONFIG_DIR" \  # 仅创建目录，不生成配置文件
     "$BASE_DIR"/docker/filebrowser/config \
     "$BASE_DIR"/docker/bitwarden/data \
     "$BASE_DIR"/docker/emby/config \
@@ -95,24 +102,6 @@ create_dirs(){
     "$BASE_DIR"/media/tvshows \
     "$BASE_DIR"/media/av \
     "$BASE_DIR"/media/downloads
-
-  # 【修复2】初始化 Dashy 配置文件（避免空文件/格式错误）
-  if [[ ! -f "$DASHY_CONFIG" ]]; then
-    log "初始化 Dashy 配置文件: $DASHY_CONFIG"
-    cat <<EOF > "$DASHY_CONFIG"
-# Dashy 最小可用配置（修复加载报错）
-appConfig:
-  title: Dashy
-  logo: https://cdn.dashy.to/logo.png
-  theme: default
-sections:
-  - name: 常用链接
-    items:
-      - title: 主页
-        url: /
-        icon: fas fa-home
-EOF
-  fi
 }
 create_dirs
 
@@ -129,7 +118,7 @@ read -e -rp "请输入泛域名 (如 *.example.com): " WILDCARD_DOMAIN
 log "使用域名: $WILDCARD_DOMAIN"
 
 # ================================================
-# 菜单功能实现（按需调用）
+# 菜单功能实现
 # ================================================
 # 1. 网络检测与配置
 check_network() {
@@ -179,7 +168,7 @@ install_docker() {
   fi
 }
 
-# 6. 部署容器（兼容修复后的 Dashy 配置）
+# 6. 部署容器
 deploy_containers() {
   local compose_url
   while true; do
@@ -208,10 +197,10 @@ deploy_containers() {
   cd "$COMPOSE_DIR" || { error "无法进入目录 $COMPOSE_DIR"; return 1; }
   docker compose up -d
 
-  # 检查 Dashy 容器状态（可选增强）
+  # 提示Dashy配置文件需手动处理
   if docker compose ps | grep -q "dashy"; then
-    log "Dashy 容器已启动，配置文件路径: $DASHY_CONFIG"
-    log "如需修改配置，可直接编辑 $DASHY_CONFIG 后重启容器"
+    log "Dashy 容器已启动"
+    log "注意：Dashy配置文件需手动创建，路径为: $DASHY_CONFIG_DIR/conf.yml"
   fi
 }
 
@@ -268,13 +257,13 @@ log_rotation() {
 # 主菜单
 # ================================================
 while true; do
-  echo -e "\n====== N100 AIO 初始化 v11.2 修复版 ======"
+  echo -e "\n====== N100 AIO 初始化 v11.2 最终修复版 ======"
   echo "1) 网络检测与配置"
   echo "2) 检查 SSH 状态与配置"
   echo "3) 启用 SSH (root & 密码)"
   echo "4) 磁盘分区 & 挂载"
   echo "5) 安装 Docker"
-  echo "6) 部署容器（修复 Dashy 配置）"
+  echo "6) 部署容器"
   echo "7) Docker 一键运维"
   echo "8) 系统更新与升级"
   echo "9) 日志轮转与清理"
@@ -295,3 +284,4 @@ while true; do
     *) warn "无效选项，请重新选择" ;;
   esac
 done
+    
