@@ -197,7 +197,7 @@ install_docker(){
   if ! command -v docker &>/dev/null; then
     curl -fsSL https://get.docker.com | sh
     apt-get install -y docker-compose-plugin
-    usermod -aG docker "$SUDO_USER"
+    usermod -aG docker "${SUDO_USER:-$(logname)}"
     log "Docker 安装完毕，请重启系统并重新运行此脚本"; exit 0
   else
     log "Docker 已安装，跳过"
