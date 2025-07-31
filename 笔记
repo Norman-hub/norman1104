@@ -1,0 +1,6 @@
+apt update  #更新软件包
+apt intall wget   #安装wget
+wget  #下载
+rm  删除
+chmod +x #赋予执行权限
+./  #运行
