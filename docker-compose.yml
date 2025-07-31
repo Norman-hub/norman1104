@@ -1,0 +1,193 @@
+version: "3.8"
+
+services:
+  # qBittorrent下载器 EE增强版 独立桥接网络（download_net）端口 8080
+  qbittorrentee:
+    #image: lscr.io/linuxserver/qbittorrent:latest 官方版
+    image: superng6/qbittorrentee
+    container_name: qbittorrentee
+    networks:
+      - download_net
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Shanghai
+      - WEBUI_PORT=8080
+      - ENABLE_DOWNLOADS_PERM_FIX=true
+    volumes:
+      - /mnt/usbdata/docker/qbittorrent/config:/config
+      - /mnt/usbdata/media/downloads:/downloads
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    restart: unless-stopped
+    
+  # 迅雷下载器  独立桥接网络（download_net）端口 2345
+  xunlei:
+    image: cnk3x/xunlei
+    container_name: xunlei
+    networks:
+      - download_net
+    privileged: true
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Shanghai
+    volumes:
+      - /mnt/usbdata/docker/xunlei:/xunlei
+      - /mnt/usbdata/media/downloads:/downloads
+    ports:
+      - "2345:2345"
+    restart: unless-stopped
+
+  # dashy导航面板  桥接模式 （proxy_net）端口 8081
+  dashy:
+    image: lissy93/dashy:latest
+    container_name: dashy
+    networks:
+      - proxy_net
+    volumes:
+      - /mnt/usbdata/docker/dashy/config/conf.yml:/app/user-data/conf.yml
+    ports:
+      - "8081:8080"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'node', '/app/services/healthcheck']
+      interval: 1m30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Glances 资源监控 (host 模式) 端口61208
+  glances:
+    image: nicolargo/glances:latest
+    container_name: glances
+    network_mode: host
+    pid: host
+    environment:
+      - GLANCES_OPT=-w
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  # Filebrowser 文件管理 桥接模式 （proxy_net）端口 8082
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: filebrowser
+    networks:
+      - proxy_net
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - /mnt/usbdata:/srv
+      - /mnt/usbdata/docker/filebrowser/config:/config
+    ports:
+      - "8082:80"
+    restart: unless-stopped
+
+  # Bitwarden 密码服务器 桥接模式 (proxy_net) 端口 8083
+  bitwarden:
+    image: vaultwarden/server:latest
+    container_name: bitwarden
+    networks:
+      - proxy_net
+    volumes:
+      - /mnt/usbdata/docker/bitwarden/data:/data
+    ports:
+      - 8083:80
+    environment:
+      - LOGIN_RATELIMIT_MAX_BURST=10
+      - LOGIN_RATELIMIT_SECONDS=60
+      - ADMIN_RATELIMIT_MAX_BURST=10
+      - ADMIN_RATELIMIT_SECONDS=60
+      - ADMIN_SESSION_LIFETIME=20
+      - SENDS_ALLOWED=true
+      - EMERGENCY_ACCESS_ALLOWED=true
+      - WEB_VAULT_ENABLED=true
+      - SIGNUPS_ALLOWED=true
+      - ADMIN_TOKEN=0YTPZH0qQr6p321LW/08VTO4WxAdt+lZQnid9M/nSNbN+yXxZ0zmzARoOnviggl6
+    restart: unless-stopped
+
+  # emby开心版 媒体服务（默认走代理 桥接模式）端口 9096
+  emby:
+    #image: lscr.io/linuxserver/emby:latest 官方版
+    image: amilys/embyserver
+    container_name: emby
+    networks:
+      - proxy_net
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Shanghai
+    volumes:
+      - /mnt/usbdata/docker/emby/config:/config
+      - /mnt/usbdata/media:/mnt/media
+    #devices:
+      #- /dev/dri:/dev/dri
+    ports:
+      - "8096:8096"
+    restart: unless-stopped
+    
+  # metatube 海报刮削 （桥接模式） 端口 9090
+  metatube:
+    image: ghcr.io/metatube-community/metatube-server:latest
+    container_name: metatube
+    networks:
+      - proxy_net
+    ports:
+      - "9090:8080"
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+    volumes:
+      - run:/var/run
+    command: -dsn "postgres://metatube:metatube@/metatube?host=/var/run/postgresql" -port 8080 -db-auto-migrate -db-prepared-stmt
+    
+  # PostgreSQL服务 -metatube数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: metatube-postgres
+    networks:
+      - proxy_net
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=metatube
+      - POSTGRES_PASSWORD=metatube
+      - POSTGRES_DB=metatube
+    volumes:
+      - /mnt/usbdata/docker/metatube/postgres:/var/lib/postgresql/data
+      - run:/var/run
+    command: "-c TimeZone=Asia/Shanghai -c log_timezone=Asia/Shanghai -c listen_addresses='' -c unix_socket_permissions=0777"
+  
+  # Nginx Proxy Manager：中文稳定版release 反代所有默认服务  管理端口 81
+  nginxproxymanager:
+    image: chishin/nginx-proxy-manager-zh:release
+    container_name: nginxproxymanager
+    networks:
+      - proxy_net
+    ports:
+      - "80:80"
+      - "81:81"
+      - "443:443"
+    volumes:
+      - /mnt/usbdata/docker/proxy/data:/data
+      - /mnt/usbdata/docker/proxy/letsencrypt:/etc/letsencrypt
+    restart: unless-stopped
+    
+  # 创建桥接网络
+networks:
+  download_net:
+    driver: bridge
+  proxy_net:
+    driver: bridge
+    
+  # 创建metatube和PostgreSQL服务共享卷  
+volumes:
+  run: 
