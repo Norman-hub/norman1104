@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------- #
-# N100 All-in-One 交互式初始化脚本 v0.19 优化版
-# 优化点：解决RTNETLINK配置冲突错误，修复子网掩码计算，增强接口状态处理
+# N100 All-in-One 交互式初始化脚本 v0.22 增强版
+# 功能增强：修复SSH菜单问题、磁盘编号问题，增加单个容器操作和Dashy配置下载
 # ---------------------------------------------------------------------------- #
 
 set -euo pipefail
@@ -43,9 +43,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 [[ "${1:-}" == "-h" ]] && display_help && exit 0
 
-# 全局变量 - 默认挂载点为/mnt/data
+# 全局变量
 BASE_DIR="/mnt/data"
 COMPOSE_DIR="$BASE_DIR/docker/compose"
+DASHY_CONF_DEFAULT_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/Dashy-conf.yml"
 MOUNTS=(/mnt/data1 /mnt/data2 /mnt/data3)
 DEFAULT_COMPOSE_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml"
 DEFAULT_LOG_DAYS=7
@@ -56,7 +57,7 @@ MEDIA_DIRS=(
   "music" "downloads" "photos" "other"
 )
 
-# 环境检测与系统信息展示
+# 环境检测
 env_check(){
   . /etc/os-release
   log "操作系统: $PRETTY_NAME"
@@ -82,7 +83,7 @@ env_check(){
   log "  已用空间: $root_used ($root_usage)"
   log "  可用空间: $root_available"
   
-  # 所有可用磁盘列表（排除loop设备）
+  # 所有可用磁盘列表
   log "\n所有可用磁盘（包括未分区/未挂载）:"
   lsblk -e 7,128,252,253 -o NAME,SIZE,TYPE,MOUNTPOINT | grep -v '^loop'
   
@@ -112,24 +113,76 @@ env_check(){
   log "系统信息检测完成"
 }
 
-# 目录结构管理函数（保持不变）
+# 目录结构管理函数（增加Dashy配置下载）
 manage_directories(){
   while true; do
     echo -e "\n====== 目录结构管理 ======"
     echo "1) 创建基础目录结构 (Docker相关)"
     echo "2) 创建常用媒体目录"
     echo "3) 查看现有目录结构"
-    echo "4) 返回主菜单"
+    echo "4) 下载Dashy配置文件"  # 新增功能
+    echo "5) 返回主菜单"
     read -e -rp "选择: " dir_opt
     
     case "$dir_opt" in
       1) create_base_directories ;;
       2) create_media_directories ;;
       3) view_directories ;;
-      4) return ;;
+      4) download_dashy_config ;;  # 新增功能
+      5) return ;;
       *) warn "无效选项，请重试" ;;
     esac
   done
+}
+
+# 新增：下载Dashy配置文件
+download_dashy_config() {
+  if [[ ! -d "$COMPOSE_DIR" ]]; then
+    warn "未检测到Docker Compose目录，正在创建..."
+    mkdir -p "$COMPOSE_DIR" || {
+      error "创建目录失败，请检查权限"
+      return 1
+    }
+  fi
+  
+  while true; do
+    echo -e "\n====== Dashy配置文件下载 ======"
+    echo "1) 使用默认配置文件"
+    echo "2) 手动输入配置文件URL"
+    echo "3) 返回上一级"
+    read -e -rp "选择: " opt
+    
+    case "$opt" in
+      1)
+        url="$DASHY_CONF_DEFAULT_URL"
+        break
+        ;;
+      2)
+        read -e -rp "请输入配置文件URL: " url
+        [[ -z "$url" ]] && { warn "URL不能为空"; continue; }
+        break
+        ;;
+      3)
+        return
+        ;;
+      *)
+        warn "无效选项，请重试"
+        ;;
+    esac
+  done
+  
+  log "正在下载配置文件: $url"
+  temp_file="$COMPOSE_DIR/Dashy-conf.yml"
+  
+  if curl -fsSL "$url" -o "$temp_file"; then
+    # 重命名为conf.yml
+    mv -f "$temp_file" "$COMPOSE_DIR/conf.yml"
+    log "配置文件已下载并保存至: $COMPOSE_DIR/conf.yml"
+  else
+    error "下载失败，请检查URL是否正确"
+    [[ -f "$temp_file" ]] && rm -f "$temp_file"
+    return 1
+  fi
 }
 
 create_base_directories(){
@@ -186,13 +239,14 @@ detect_ip(){
   log "本机IP: $IP_ADDR"
 }
 
-# 网络检测与配置（核心修复部分）
+# 网络检测与配置
 network_menu(){
   while true; do
     echo -e "\n====== 网络管理 ======"
     echo "1) 查看网络状态"
     echo "2) 配置网络 (DHCP/静态IP)"
-    echo "3) 返回主菜单"
+    echo "3) 清理重复IP地址"
+    echo "4) 返回主菜单"
     read -e -rp "选择: " nopt
     
     case "$nopt" in
@@ -208,6 +262,9 @@ network_menu(){
         network_config
         ;;
       3)
+        cleanup_duplicate_ips
+        ;;
+      4)
         return
         ;;
       *)
@@ -217,10 +274,9 @@ network_menu(){
   done
 }
 
-# 计算子网掩码（修复核心错误）
+# 计算子网掩码
 calculate_netmask() {
   local cidr=$1
-  # CIDR前缀转子网掩码（如24 → 255.255.255.0）
   local netmask=""
   for ((i=0; i<4; i++)); do
     if (( cidr >= 8 )); then
@@ -233,25 +289,94 @@ calculate_netmask() {
       cidr=0
     fi
   done
-  # 移除末尾的点
   echo "${netmask%.*}"
 }
 
-network_config(){
-  # 检查并处理NetworkManager冲突
-  if systemctl is-active --quiet NetworkManager; then
-    warn "检测到NetworkManager正在运行，这会导致网络配置冲突"
-    read -e -rp "是否停止并禁用NetworkManager? [y/N]: " stop_nm
-    if [[ "$stop_nm" =~ ^[Yy]$ ]]; then
-      systemctl stop NetworkManager
-      systemctl disable NetworkManager
-      log "NetworkManager已停止并禁用"
-    else
-      warn "继续操作可能导致网络配置失败"
-      read -e -rp "是否继续? [y/N]: " cont
-      [[ ! "$cont" =~ ^[Yy]$ ]] && return
-    fi
+# 清理重复IP函数
+cleanup_duplicate_ips() {
+  echo -e "\n检测到的网络接口："
+  ip -brief link show | grep -v LOOPBACK | nl
+  
+  read -e -rp "请输入需要清理的接口编号: " idx
+  iface=$(ip -brief link show | grep -v LOOPBACK | sed -n "${idx}p" | awk '{print $1}')
+  [[ -z "$iface" ]] && { warn "无效接口编号"; return 1; }
+  
+  log "接口 $iface 上的IP地址："
+  ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+' | nl
+  
+  read -e -rp "请输入要删除的IP编号 (多个用空格分隔，0表示全部删除除第一个外的IP): " ip_nums
+  if [[ "$ip_nums" == "0" ]]; then
+    # 保留第一个IP，删除其余所有IP
+    ips=$(ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+' | tail -n +2)
+    for ip in $ips; do
+      log "删除IP: $ip"
+      ip addr del "$ip" dev "$iface"
+    done
+  else
+    # 删除指定编号的IP
+    for num in $ip_nums; do
+      ip=$(ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+' | sed -n "${num}p")
+      if [[ -n "$ip" ]]; then
+        log "删除IP: $ip"
+        ip addr del "$ip" dev "$iface"
+      else
+        warn "无效的IP编号: $num"
+      fi
+    done
   fi
+  
+  log "清理后接口 $iface 的IP地址："
+  ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+'
+}
+
+# 增强版接口清理函数
+cleanup_interface() {
+  local iface=$1
+  log "正在彻底清理接口 $iface 的残留配置..."
+  
+  # 1. 停止接口
+  ifdown "$iface" 2>/dev/null || true
+  
+  # 2. 清除所有IP地址
+  existing_ips=$(ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+')
+  if [[ -n "$existing_ips" ]]; then
+    log "发现并清除以下现有IP:"
+    while IFS= read -r ip; do
+      echo "  - $ip"
+      ip addr del "$ip" dev "$iface" 2>/dev/null || true
+    done <<< "$existing_ips"
+  fi
+  
+  # 3. 清除接口路由
+  ip route flush dev "$iface" 2>/dev/null || true
+  
+  # 4. 确保接口物理状态为up
+  ip link set dev "$iface" up 2>/dev/null || true
+  
+  # 5. 移除可能的冲突配置文件
+  rm -f "/etc/network/interfaces.d/${iface}.*" 2>/dev/null || true
+  
+  log "接口 $iface 清理完成"
+}
+
+network_config(){
+  # 检查并处理所有网络管理服务冲突
+  local conflict_services=("NetworkManager" "systemd-networkd")
+  for service in "${conflict_services[@]}"; do
+    if systemctl is-active --quiet "$service"; then
+      warn "检测到冲突的网络服务: $service 正在运行"
+      read -e -rp "是否停止并禁用 $service? [y/N]: " stop_service
+      if [[ "$stop_service" =~ ^[Yy]$ ]]; then
+        systemctl stop "$service"
+        systemctl disable "$service"
+        log "$service 已停止并禁用"
+      else
+        warn "继续操作可能导致网络配置失败"
+        read -e -rp "是否继续? [y/N]: " cont
+        [[ ! "$cont" =~ ^[Yy]$ ]] && return
+      fi
+    fi
+  done
 
   while true; do
     echo -e "\n网络配置选项："
@@ -265,26 +390,30 @@ network_config(){
         iface=$(ip -o link show | awk -F': ' '/state UP/ {print $2}' | head -1)
         [[ -z "$iface" ]] && { warn "无可用接口"; continue; }
         
-        log "应用DHCP配置到接口 $iface..."
-        # 先清理现有配置
-        ifdown "$iface" || true
+        # 增强版清理流程
+        cleanup_interface "$iface"
         
-        # 生成DHCP配置（包含DNS）
+        log "应用DHCP配置到接口 $iface..."
+        # 生成DHCP配置
         cat >"/etc/network/interfaces.d/$iface.cfg" <<EOF
 auto $iface
 iface $iface inet dhcp
 dns-nameservers 8.8.8.8 114.114.114.114
 EOF
         
-        # 分步启动接口（解决RTNETLINK错误）
+        # 启动接口
         if ifup "$iface"; then
           log "DHCP 配置应用完成"
-          log "新IP地址:"
+          log "分配的IP地址:"
           ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+'
         else
           error "接口启动失败"
-          error "请查看配置文件: /etc/network/interfaces.d/$iface.cfg"
-          error "尝试手动修复: ifdown $iface && ifup $iface"
+          error "配置文件内容:"
+          cat "/etc/network/interfaces.d/$iface.cfg"
+          error "尝试手动修复命令:"
+          echo "  ip addr flush dev $iface"
+          echo "  ip route flush dev $iface"
+          echo "  ifup $iface"
         fi
         ;;
       2)
@@ -299,8 +428,14 @@ EOF
         # 提取IP和CIDR前缀
         ip_addr=$(echo "$sip" | cut -d'/' -f1)
         cidr=$(echo "$sip" | cut -d'/' -f2)
-        # 计算子网掩码（修复之前的错误计算）
         netmask=$(calculate_netmask "$cidr")
+        
+        # 检查该IP是否已存在
+        if ip -4 addr show | grep -q "$ip_addr/"; then
+          warn "警告：IP地址 $ip_addr 已在其他接口上使用"
+          read -e -rp "是否继续使用此IP? [y/N]: " cont
+          [[ ! "$cont" =~ ^[Yy]$ ]] && continue
+        fi
         
         read -e -rp "网关 (如 192.168.1.1): " gtw
         if ! echo "$gtw" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
@@ -310,33 +445,43 @@ EOF
         read -e -rp "DNS服务器 (多个用空格分隔，默认: 8.8.8.8 114.114.114.114): " dns
         dns=${dns:-"8.8.8.8 114.114.114.114"}
         
-        log "应用静态IP配置到接口 $iface..."
-        # 先清理现有配置（解决冲突核心步骤）
-        ifdown "$iface" || true
-        # 清除可能的残留路由
-        ip route flush dev "$iface" || true
+        # 增强版清理流程
+        cleanup_interface "$iface"
         
+        log "应用静态IP配置到接口 $iface..."
         # 生成静态IP配置
         cat >"/etc/network/interfaces.d/$iface.cfg" <<EOF
 auto $iface
 iface $iface inet static
-  address $ip_addr
+  address $ip_addr/$cidr
   netmask $netmask
   gateway $gtw
   dns-nameservers $dns
 EOF
         
-        # 分步启动接口（避免直接重启服务导致的冲突）
+        # 启动接口
         if ifup "$iface"; then
           log "静态IP 配置应用完成"
-          log "配置信息:"
-          grep -v '^#' "/etc/network/interfaces.d/$iface.cfg"
-          log "当前IP地址:"
+          log "配置的IP地址:"
           ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+'
+          
+          # 检查是否仍然存在多个IP
+          ip_count=$(ip -4 addr show "$iface" | grep -c 'inet ')
+          if (( ip_count > 1 )); then
+            warn "检测到仍然存在多个IP地址"
+            read -e -rp "是否自动清理多余IP? [y/N]: " clean
+            if [[ "$clean" =~ ^[Yy]$ ]]; then
+              cleanup_duplicate_ips
+            fi
+          fi
         else
           error "接口启动失败"
-          error "请查看配置文件: /etc/network/interfaces.d/$iface.cfg"
-          error "尝试手动修复: ifdown $iface && ifup $iface"
+          error "配置文件内容:"
+          cat "/etc/network/interfaces.d/$iface.cfg"
+          error "尝试手动修复命令:"
+          echo "  ip addr flush dev $iface"
+          echo "  ip route flush dev $iface"
+          echo "  ifup $iface"
         fi
         ;;
       3)
@@ -349,7 +494,7 @@ EOF
   done
 }
 
-# SSH 管理（保持不变）
+# SSH 管理（修复菜单退出问题）
 ssh_menu(){
   while true; do
     echo -e "\n====== SSH 管理 ======"
@@ -360,7 +505,11 @@ ssh_menu(){
     read -e -rp "选择: " sopt
     
     case "$sopt" in
-      1) check_ssh_status ;;
+      1) 
+        check_ssh_status 
+        # 增加暂停，避免查看后立即返回
+        read -e -rp "按Enter键继续..."
+        ;;
       2) install_ssh ;;
       3) configure_root_ssh ;;
       4) return ;;
@@ -418,7 +567,7 @@ configure_root_ssh(){
   log "SSH配置已更新：允许root密码登录"
 }
 
-# 磁盘分区 & 挂载（保持不变）
+# 磁盘分区 & 挂载（修复编号显示问题）
 partition_disk(){
   if ! command -v parted &>/dev/null; then
     log "安装 parted..."
@@ -427,11 +576,13 @@ partition_disk(){
   
   while true; do
     echo -e "\n可用磁盘列表："
-    lsblk -e 7,128,252,253 -o NAME,SIZE,TYPE,MOUNTPOINT | grep -v '^loop' | nl
+    # 修复磁盘编号显示问题，正确提取设备名
+    lsblk -e 7,128,252,253 -o NAME,SIZE,TYPE,MOUNTPOINT | grep -v '^loop' | awk 'NR==1; NR>1' | nl -w2 -s') '
     
     read -e -rp "请输入要操作的磁盘编号 (或 q 返回): " idx
     [[ "$idx" == "q" ]] && return
     
+    # 正确获取设备名
     dev=$(lsblk -e 7,128,252,253 -no NAME | grep -v '^loop' | sed -n "${idx}p")
     [[ -z "$dev" ]] && { warn "无效编号"; continue; }
     
@@ -462,7 +613,7 @@ partition_disk(){
   done
 }
 
-# Docker 安装与部署（保持不变）
+# Docker 安装与部署
 install_docker(){
   if ! command -v curl &>/dev/null; then
     log "安装 curl..."
@@ -510,7 +661,7 @@ deploy_containers(){
     read -e -rp "选择: " o
     
     case "$o" in
-      1) URL="$DEFAULT_COMPOSE_URL"; break ;;
+      1) 网站="$DEFAULT_COMPOSE_URL"; break ;;
       2) read -e -rp "请输入 compose 文件 URL: " URL; break ;;
       3) return ;;
       *) warn "无效选项，请重试" ;;
@@ -518,7 +669,7 @@ deploy_containers(){
   done
   
   if [[ "$URL" =~ github\.com/.*/blob/.* ]]; then
-    URL="${URL/\/blob\//\/raw\/}"
+    网站="${URL/\/blob\//\/raw\/}"
     log "已转换为 Raw URL: $URL"
   fi
   
@@ -533,33 +684,142 @@ deploy_containers(){
   log "容器部署完成"
 }
 
-# Docker 一键运维（保持不变）
+# Docker 一键运维（增加单个容器操作）
 docker_one_click(){
   while true; do
     echo -e "\n====== Docker 运维 ======"
-    echo "1) 查看容器状态"
-    echo "2) 重启所有运行中的容器"
-    echo "3) 停止所有运行中的容器"
-    echo "4) 清理无用镜像和容器"
-    echo "5) 返回主菜单"
+    echo "1) 查看所有容器状态"
+    echo "2) 对单个容器进行操作"
+    echo "3) 重启所有运行中的容器"
+    echo "4) 停止所有运行中的容器"
+    echo "5) 清理无用镜像和容器"
+    echo "6) 返回主菜单"
     read -e -rp "选择: " opt
     
     case "$opt" in
-      1) docker ps -a ;;
-      2) docker restart $(docker ps -q) ;;
-      3) docker stop $(docker ps -q) ;;
+      1) 
+        docker ps -a 
+        read -e -rp "按Enter键继续..."
+        ;;
+      2) 
+        manage_single_container 
+        ;;
+      3) 
+        log "重启所有运行中的容器..."
+        docker restart $(docker ps -q) 
+        ;;
       4) 
+        log "停止所有运行中的容器..."
+        docker stop $(docker ps -q) 
+        ;;
+      5) 
         log "正在清理无用资源..."
         docker system prune -a -f --volumes
         log "清理完成"
         ;;
-      5) return ;;
-      *) warn "无效选项，请重试" ;;
+      6) 
+        return 
+        ;;
+      *) 
+        warn "无效选项，请重试" 
+        ;;
     esac
   done
 }
 
-# 系统更新与日志轮转（保持不变）
+# 新增：管理单个容器
+manage_single_container() {
+  if ! command -v docker &>/dev/null; then
+    error "未检测到Docker，请先安装"
+    return 1
+  fi
+  
+  # 获取所有容器列表
+  containers=$(docker ps -a --format "{{.ID}} {{.Names}} {{.Status}}")
+  
+  if [[ -z "$containers" ]]; then
+    log "未检测到任何容器"
+    return 0
+  fi
+  
+  echo -e "\n容器列表："
+  echo "$containers" | nl -w2 -s') '
+  
+  read -e -rp "请输入要操作的容器编号: " idx
+  container_info=$(echo "$containers" | sed -n "${idx}p")
+  
+  if [[ -z "$container_info" ]]; then
+    warn "无效的容器编号"
+    return 1
+  fi
+  
+  container_id=$(echo "$container_info" | awk '{print $1}')
+  container_name=$(echo "$container_info" | awk '{print $2}')
+  
+  log "您选择的容器: $container_name ($container_id)"
+  
+  while true; do
+    echo -e "\n对容器 $container_name 的操作："
+    echo "1) 启动容器"
+    echo "2) 停止容器"
+    echo "3) 重启容器"
+    echo "4) 查看容器日志"
+    echo "5) 进入容器终端"
+    echo "6) 删除容器"
+    echo "7) 返回上一级"
+    read -e -rp "选择操作: " action
+    
+    case "$action" in
+      1)
+        log "启动容器 $container_name..."
+        docker start "$container_id"
+        ;;
+      2)
+        log "停止容器 $container_name..."
+        docker stop "$container_id"
+        ;;
+      3)
+        log "重启容器 $container_name..."
+        docker restart "$container_id"
+        ;;
+      4)
+        log "容器 $container_name 的日志（最后100行）："
+        docker logs --tail 100 "$container_id"
+        read -e -rp "按Enter键继续..."
+        ;;
+      5)
+        log "进入容器 $container_name 的终端..."
+        if docker exec -it "$container_id" /bin/bash; then
+          log "已退出容器终端"
+        else
+          log "尝试使用sh进入..."
+          docker exec -it "$container_id" /bin/sh
+          log "已退出容器终端"
+        fi
+        ;;
+      6)
+        read -e -rp "确定要删除容器 $container_name 吗? [y/N]: " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+          # 先停止容器（如果正在运行）
+          if docker ps --format '{{.ID}}' | grep -q "$container_id"; then
+            log "停止容器 $container_name..."
+            docker stop "$container_id"
+          fi
+          log "删除容器 $container_name..."
+          docker rm "$container_id"
+        fi
+        ;;
+      7)
+        return
+        ;;
+      *)
+        warn "无效选项，请重试"
+        ;;
+    esac
+  done
+}
+
+# 系统更新与日志轮转
 update_system(){
   . /etc/os-release
   VERSION_ID=${VERSION_ID%%.*}
@@ -600,7 +860,7 @@ log_rotate(){
 
 # 主菜单
 while true; do
-  echo -e "\n====== N100 AIO 初始化 v0.19 ======"
+  echo -e "\n====== N100 AIO 初始化 v0.22 ======"
   echo "1) 环境检测"
   echo "2) 网络管理"
   echo "3) SSH 管理"
