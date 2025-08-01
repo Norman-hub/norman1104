@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------- #
-# N100 All-in-One 交互式初始化脚本 v0.15 优化版
-# 优化点：恢复磁盘信息显示、日志轮转增加自动清理设置、增强系统信息展示
+# N100 All-in-One 交互式初始化脚本 v0.16 优化版
+# 优化点：目录创建改为菜单选项、环境检测与目录操作分离、增加媒体目录管理
 # ---------------------------------------------------------------------------- #
 
 set -euo pipefail
@@ -23,10 +23,11 @@ display_help(){
 选项:
   -h        显示帮助信息
 功能:
-  环境检测 (自动)
+  环境检测
   网络检测与配置
   SSH 管理 (状态查看与配置)
   磁盘分区 & 挂载
+  目录结构创建与管理
   安装 Docker
   部署容器
   Docker 一键运维
@@ -50,7 +51,19 @@ DEFAULT_COMPOSE_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads
 # 日志保留天数默认值
 DEFAULT_LOG_DAYS=7
 
-# 环境检测与系统信息展示
+# 常用媒体目录定义
+MEDIA_DIRS=(
+  "movies"       # 电影
+  "tvshows"      # 电视剧
+  "documentary"  # 纪录片
+  "anime"        # 动漫
+  "music"        # 音乐
+  "downloads"    # 下载
+  "photos"       # 照片
+  "other"        # 其他
+)
+
+# 环境检测与系统信息展示（不含目录创建）
 env_check(){
   # 基础系统信息
   . /etc/os-release
@@ -67,7 +80,7 @@ env_check(){
   mem_available=$(free -h | awk '/^Mem:/ {print $7}')
   log "内存总量: $mem_total (可用: $mem_available)"
   
-  # 磁盘信息（增强显示）
+  # 磁盘信息
   log "磁盘信息 ($BASE_DIR):"
   # 获取磁盘统计信息
   disk_stats=$(df -h "$BASE_DIR" 2>/dev/null || df -h /)
@@ -90,21 +103,82 @@ env_check(){
   
   log "系统信息检测完成"
 }
-env_check
 
-# 创建基础目录结构（仅保留必要目录）
-log "创建基础目录结构"
-mkdir -p "$BASE_DIR" "$COMPOSE_DIR" "$BASE_DIR/media"
+# 目录结构创建与管理
+manage_directories(){
+  while true; do
+    echo -e "\n====== 目录结构管理 ======"
+    echo "1) 创建基础目录结构 (Docker相关)"
+    echo "2) 创建常用媒体目录"
+    echo "3) 查看现有目录结构"
+    echo "4) 返回主菜单"
+    read -e -rp "选择: " dir_opt
+    
+    case "$dir_opt" in
+      1)
+        create_base_directories
+        ;;
+      2)
+        create_media_directories
+        ;;
+      3)
+        view_directories
+        ;;
+      4)
+        return
+        ;;
+      *)
+        warn "无效选项，请重试"
+        ;;
+    esac
+  done
+}
+
+# 创建基础目录结构
+create_base_directories(){
+  log "创建基础目录结构..."
+  mkdir -p \
+    "$BASE_DIR" \
+    "$COMPOSE_DIR" \
+    "$BASE_DIR/docker/configs" \
+    "$BASE_DIR/docker/data" \
+    "$BASE_DIR/media"
+  
+  log "基础目录结构创建完成:"
+  ls -ld "$BASE_DIR" "$COMPOSE_DIR" "$BASE_DIR/media"
+}
+
+# 创建常用媒体目录
+create_media_directories(){
+  if [[ ! -d "$BASE_DIR/media" ]]; then
+    warn "未检测到基础媒体目录，先创建基础目录结构"
+    create_base_directories
+  fi
+  
+  log "创建常用媒体目录..."
+  for dir in "${MEDIA_DIRS[@]}"; do
+    mkdir -p "$BASE_DIR/media/$dir"
+    echo "创建: $BASE_DIR/media/$dir"
+  done
+  
+  log "常用媒体目录创建完成"
+}
+
+# 查看现有目录结构
+view_directories(){
+  log "当前目录结构 ($BASE_DIR):"
+  if [[ -d "$BASE_DIR" ]]; then
+    tree -L 3 "$BASE_DIR" || ls -lR "$BASE_DIR" | head -n 50
+  else
+    warn "基础目录 $BASE_DIR 不存在，请先创建目录结构"
+  fi
+}
 
 # 检测IP
 detect_ip(){
   IP_ADDR="$(hostname -I | awk '{print $1}')"
   log "本机IP: $IP_ADDR"
 }
-detect_ip
-
-read -e -rp "请输入泛域名 (如 *.example.com): " WILDCARD_DOMAIN
-log "使用域名: $WILDCARD_DOMAIN"
 
 # 网络检测与配置
 network_menu(){
@@ -186,7 +260,7 @@ EOF
   done
 }
 
-# SSH 管理（合并状态查看与配置）
+# SSH 管理
 ssh_menu(){
   while true; do
     echo -e "\n====== SSH 管理 ======"
@@ -337,7 +411,7 @@ deploy_containers(){
   
   # 检查docker-compose是否可用
   if ! command -v docker compose &>/dev/null; then
-    error "未检测到 docker-compose-plugin，请先执行 5) 安装 Docker"
+    error "未检测到 docker-compose-plugin，请先执行 6) 安装 Docker"
     return 1
   fi
   
@@ -415,7 +489,7 @@ update_system(){
   log "系统更新完毕"
 }
 
-# 日志轮转（增加自动清理设置）
+# 日志轮转（带自动清理设置）
 log_rotate(){
   local log_days
   
@@ -448,31 +522,35 @@ log_rotate(){
 
 # 主菜单
 while true; do
-  echo -e "\n====== N100 AIO 初始化 v0.15 ======"
-  echo "1) 网络管理"
-  echo "2) SSH 管理"
-  echo "3) 磁盘分区 & 挂载"
-  echo "4) 安装 Docker"
-  echo "5) 部署容器"
-  echo "6) Docker 一键运维"
-  echo "7) 系统更新与升级"
-  echo "8) 日志轮转与清理（可设置自动清理时间）"
-  echo "9) 显示帮助信息"
+  echo -e "\n====== N100 AIO 初始化 v0.16 ======"
+  echo "1) 环境检测"
+  echo "2) 网络管理"
+  echo "3) SSH 管理"
+  echo "4) 磁盘分区 & 挂载"
+  echo "5) 目录结构创建与管理"
+  echo "6) 安装 Docker"
+  echo "7) 部署容器"
+  echo "8) Docker 一键运维"
+  echo "9) 系统更新与升级"
+  echo "10) 日志轮转与清理（可设置自动清理时间）"
+  echo "11) 显示帮助信息"
   echo "q) 退出脚本"
-  read -e -rp "请选择操作 [1-9/q]: " ch
+  read -e -rp "请选择操作 [1-11/q]: " ch
   
   case "$ch" in
-    1) network_menu ;;
-    2) ssh_menu ;;
-    3) partition_disk ;;
-    4) install_docker ;;
-    5) deploy_containers ;;
-    6) docker_one_click ;;
-    7) update_system ;;
-    8) log_rotate ;;
-    9) display_help ;;
+    1) env_check ;;
+    2) network_menu ;;
+    3) ssh_menu ;;
+    4) partition_disk ;;
+    5) manage_directories ;;
+    6) install_docker ;;
+    7) deploy_containers ;;
+    8) docker_one_click ;;
+    9) update_system ;;
+    10) log_rotate ;;
+    11) display_help ;;
     q) log "退出脚本"; break ;;
-    *) warn "无效选项，请输入1-9或q" ;;
+    *) warn "无效选项，请输入1-11或q" ;;
   esac
 done
 
