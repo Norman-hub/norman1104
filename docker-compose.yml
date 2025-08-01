@@ -4,7 +4,7 @@ services:
   # qBittorrent下载器 EE增强版 独立桥接网络（download_net）端口 8080
   qbittorrentee:
     #image: lscr.io/linuxserver/qbittorrent:latest 官方版
-    image: uperng6/qbittorrentee
+    image: superng6/qbittorrentee
     container_name: qbittorrentee
     networks:
       - download_net
