@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------- #
-# N100 All-in-One 交互式初始化脚本 v0.22 增强版
-# 功能增强：修复SSH菜单问题、磁盘编号问题，增加单个容器操作和Dashy配置下载
+# N100 All-in-One 交互式初始化脚本 v0.23 增强版
+# 修复点：磁盘编号显示、统一q键返回、Dashy配置目录调整、SSH状态退出问题
 # ---------------------------------------------------------------------------- #
 
 set -euo pipefail
@@ -46,6 +46,8 @@ fi
 # 全局变量
 BASE_DIR="/mnt/data"
 COMPOSE_DIR="$BASE_DIR/docker/compose"
+# Dashy配置目录调整为容器对应的配置目录
+DASHY_CONFIG_DIR="$BASE_DIR/docker/configs/dashy"
 DASHY_CONF_DEFAULT_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/Dashy-conf.yml"
 MOUNTS=(/mnt/data1 /mnt/data2 /mnt/data3)
 DEFAULT_COMPOSE_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml"
@@ -113,33 +115,37 @@ env_check(){
   log "系统信息检测完成"
 }
 
-# 目录结构管理函数（增加Dashy配置下载）
+# 目录结构管理函数（含Dashy配置下载）
 manage_directories(){
   while true; do
     echo -e "\n====== 目录结构管理 ======"
     echo "1) 创建基础目录结构 (Docker相关)"
     echo "2) 创建常用媒体目录"
     echo "3) 查看现有目录结构"
-    echo "4) 下载Dashy配置文件"  # 新增功能
-    echo "5) 返回主菜单"
+    echo "4) 下载Dashy配置文件"
+    echo "5) 返回主菜单 (或输入q)"
     read -e -rp "选择: " dir_opt
+    
+    # 支持q键返回
+    [[ "$dir_opt" == "q" ]] && return
     
     case "$dir_opt" in
       1) create_base_directories ;;
       2) create_media_directories ;;
       3) view_directories ;;
-      4) download_dashy_config ;;  # 新增功能
+      4) download_dashy_config ;;
       5) return ;;
-      *) warn "无效选项，请重试" ;;
+      *) warn "无效选项，请重试（或输入q返回）" ;;
     esac
   done
 }
 
-# 新增：下载Dashy配置文件
+# 下载Dashy配置文件（调整到容器配置目录）
 download_dashy_config() {
-  if [[ ! -d "$COMPOSE_DIR" ]]; then
-    warn "未检测到Docker Compose目录，正在创建..."
-    mkdir -p "$COMPOSE_DIR" || {
+  # 确保Dashy配置目录存在
+  if [[ ! -d "$DASHY_CONFIG_DIR" ]]; then
+    warn "未检测到Dashy配置目录，正在创建: $DASHY_CONFIG_DIR"
+    mkdir -p "$DASHY_CONFIG_DIR" || {
       error "创建目录失败，请检查权限"
       return 1
     }
@@ -149,8 +155,11 @@ download_dashy_config() {
     echo -e "\n====== Dashy配置文件下载 ======"
     echo "1) 使用默认配置文件"
     echo "2) 手动输入配置文件URL"
-    echo "3) 返回上一级"
+    echo "3) 返回上一级 (或输入q)"
     read -e -rp "选择: " opt
+    
+    # 支持q键返回
+    [[ "$opt" == "q" ]] && return
     
     case "$opt" in
       1)
@@ -166,18 +175,18 @@ download_dashy_config() {
         return
         ;;
       *)
-        warn "无效选项，请重试"
+        warn "无效选项，请重试（或输入q返回）"
         ;;
     esac
   done
   
   log "正在下载配置文件: $url"
-  temp_file="$COMPOSE_DIR/Dashy-conf.yml"
+  temp_file="$DASHY_CONFIG_DIR/Dashy-conf.yml"
   
   if curl -fsSL "$url" -o "$temp_file"; then
     # 重命名为conf.yml
-    mv -f "$temp_file" "$COMPOSE_DIR/conf.yml"
-    log "配置文件已下载并保存至: $COMPOSE_DIR/conf.yml"
+    mv -f "$temp_file" "$DASHY_CONFIG_DIR/conf.yml"
+    log "配置文件已下载并保存至: $DASHY_CONFIG_DIR/conf.yml"
   else
     error "下载失败，请检查URL是否正确"
     [[ -f "$temp_file" ]] && rm -f "$temp_file"
@@ -196,11 +205,12 @@ create_base_directories(){
     "$BASE_DIR" \
     "$COMPOSE_DIR" \
     "$BASE_DIR/docker/configs" \
+    "$DASHY_CONFIG_DIR"  # 确保创建Dashy配置目录
     "$BASE_DIR/docker/data" \
     "$BASE_DIR/media"
   
   log "基础目录结构创建完成:"
-  ls -ld "$BASE_DIR" "$COMPOSE_DIR" "$BASE_DIR/media"
+  ls -ld "$BASE_DIR" "$COMPOSE_DIR" "$BASE_DIR/media" "$DASHY_CONFIG_DIR"
 }
 
 create_media_directories(){
@@ -246,8 +256,11 @@ network_menu(){
     echo "1) 查看网络状态"
     echo "2) 配置网络 (DHCP/静态IP)"
     echo "3) 清理重复IP地址"
-    echo "4) 返回主菜单"
+    echo "4) 返回主菜单 (或输入q)"
     read -e -rp "选择: " nopt
+    
+    # 支持q键返回
+    [[ "$nopt" == "q" ]] && return
     
     case "$nopt" in
       1)
@@ -268,7 +281,7 @@ network_menu(){
         return
         ;;
       *)
-        warn "无效选项，请重试"
+        warn "无效选项，请重试（或输入q返回）"
         ;;
     esac
   done
@@ -297,14 +310,18 @@ cleanup_duplicate_ips() {
   echo -e "\n检测到的网络接口："
   ip -brief link show | grep -v LOOPBACK | nl
   
-  read -e -rp "请输入需要清理的接口编号: " idx
+  read -e -rp "请输入需要清理的接口编号 (或输入q返回): " idx
+  [[ "$idx" == "q" ]] && return
+  
   iface=$(ip -brief link show | grep -v LOOPBACK | sed -n "${idx}p" | awk '{print $1}')
   [[ -z "$iface" ]] && { warn "无效接口编号"; return 1; }
   
   log "接口 $iface 上的IP地址："
   ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+' | nl
   
-  read -e -rp "请输入要删除的IP编号 (多个用空格分隔，0表示全部删除除第一个外的IP): " ip_nums
+  read -e -rp "请输入要删除的IP编号 (多个用空格分隔，0表示全部删除除第一个外的IP，或输入q返回): " ip_nums
+  [[ "$ip_nums" == "q" ]] && return
+  
   if [[ "$ip_nums" == "0" ]]; then
     # 保留第一个IP，删除其余所有IP
     ips=$(ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+' | tail -n +2)
@@ -365,15 +382,16 @@ network_config(){
   for service in "${conflict_services[@]}"; do
     if systemctl is-active --quiet "$service"; then
       warn "检测到冲突的网络服务: $service 正在运行"
-      read -e -rp "是否停止并禁用 $service? [y/N]: " stop_service
+      read -e -rp "是否停止并禁用 $service? [y/N/q]: " stop_service
+      [[ "$stop_service" == "q" ]] && return
       if [[ "$stop_service" =~ ^[Yy]$ ]]; then
         systemctl stop "$service"
         systemctl disable "$service"
         log "$service 已停止并禁用"
       else
         warn "继续操作可能导致网络配置失败"
-        read -e -rp "是否继续? [y/N]: " cont
-        [[ ! "$cont" =~ ^[Yy]$ ]] && return
+        read -e -rp "是否继续? [y/N/q]: " cont
+        [[ "$cont" == "q" || ! "$cont" =~ ^[Yy]$ ]] && return
       fi
     fi
   done
@@ -382,8 +400,11 @@ network_config(){
     echo -e "\n网络配置选项："
     echo "1) DHCP (动态IP)"
     echo "2) 静态IP"
-    echo "3) 返回上一级"
+    echo "3) 返回上一级 (或输入q)"
     read -e -rp "选择: " opt
+    
+    # 支持q键返回
+    [[ "$opt" == "q" ]] && return
     
     case "$opt" in
       1)
@@ -420,7 +441,8 @@ EOF
         iface=$(ip -o link show | awk -F': ' '/state UP/ {print $2}' | head -1)
         [[ -z "$iface" ]] && { warn "无可用接口"; continue; }
         
-        read -e -rp "静态IP (如 192.168.1.100/24): " sip
+        read -e -rp "静态IP (如 192.168.1.100/24，或输入q返回): " sip
+        [[ "$sip" == "q" ]] && return
         if ! echo "$sip" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'; then
           warn "IP格式错误（示例：192.168.1.100/24）"; continue
         fi
@@ -433,16 +455,18 @@ EOF
         # 检查该IP是否已存在
         if ip -4 addr show | grep -q "$ip_addr/"; then
           warn "警告：IP地址 $ip_addr 已在其他接口上使用"
-          read -e -rp "是否继续使用此IP? [y/N]: " cont
-          [[ ! "$cont" =~ ^[Yy]$ ]] && continue
+          read -e -rp "是否继续使用此IP? [y/N/q]: " cont
+          [[ "$cont" == "q" || ! "$cont" =~ ^[Yy]$ ]] && continue
         fi
         
-        read -e -rp "网关 (如 192.168.1.1): " gtw
+        read -e -rp "网关 (如 192.168.1.1，或输入q返回): " gtw
+        [[ "$gtw" == "q" ]] && return
         if ! echo "$gtw" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
           warn "网关格式错误"; continue
         fi
 
-        read -e -rp "DNS服务器 (多个用空格分隔，默认: 8.8.8.8 114.114.114.114): " dns
+        read -e -rp "DNS服务器 (多个用空格分隔，默认: 8.8.8.8 114.114.114.114，或输入q返回): " dns
+        [[ "$dns" == "q" ]] && return
         dns=${dns:-"8.8.8.8 114.114.114.114"}
         
         # 增强版清理流程
@@ -469,7 +493,8 @@ EOF
           ip_count=$(ip -4 addr show "$iface" | grep -c 'inet ')
           if (( ip_count > 1 )); then
             warn "检测到仍然存在多个IP地址"
-            read -e -rp "是否自动清理多余IP? [y/N]: " clean
+            read -e -rp "是否自动清理多余IP? [y/N/q]: " clean
+            [[ "$clean" == "q" ]] && return
             if [[ "$clean" =~ ^[Yy]$ ]]; then
               cleanup_duplicate_ips
             fi
@@ -488,32 +513,47 @@ EOF
         return
         ;;
       *)
-        warn "无效选项，请重试"
+        warn "无效选项，请重试（或输入q返回）"
         ;;
     esac
   done
 }
 
-# SSH 管理（修复菜单退出问题）
+# SSH 管理（修复查看状态后退出问题）
 ssh_menu(){
   while true; do
     echo -e "\n====== SSH 管理 ======"
     echo "1) 查看SSH状态与配置"
     echo "2) 安装并启用SSH服务"
     echo "3) 配置SSH允许root登录"
-    echo "4) 返回主菜单"
+    echo "4) 返回主菜单 (或输入q)"
     read -e -rp "选择: " sopt
+    
+    # 支持q键返回
+    [[ "$sopt" == "q" ]] && return
     
     case "$sopt" in
       1) 
         check_ssh_status 
-        # 增加暂停，避免查看后立即返回
-        read -e -rp "按Enter键继续..."
+        # 强化暂停机制，确保不会退出到主菜单
+        read -e -rp "按Enter键返回SSH管理菜单..."
         ;;
-      2) install_ssh ;;
-      3) configure_root_ssh ;;
-      4) return ;;
-      *) warn "无效选项，请重试" ;;
+      2) 
+        install_ssh 
+        # 操作完成后暂停，避免直接返回
+        read -e -rp "操作完成，按Enter键继续..."
+        ;;
+      3) 
+        configure_root_ssh 
+        # 操作完成后暂停，避免直接返回
+        read -e -rp "操作完成，按Enter键继续..."
+        ;;
+      4) 
+        return 
+        ;;
+      *) 
+        warn "无效选项，请重试（或输入q返回）" 
+        ;;
     esac
   done
 }
@@ -575,32 +615,33 @@ partition_disk(){
   fi
   
   while true; do
-    echo -e "\n可用磁盘列表："
-    # 修复磁盘编号显示问题，正确提取设备名
-    lsblk -e 7,128,252,253 -o NAME,SIZE,TYPE,MOUNTPOINT | grep -v '^loop' | awk 'NR==1; NR>1' | nl -w2 -s') '
+    echo -e "\n可用磁盘列表（仅显示物理磁盘，不包含分区）："
+    # 仅显示物理磁盘（TYPE为disk），排除分区，修复编号问题
+    lsblk -e 7,128,252,253 -o NAME,SIZE,TYPE,MOUNTPOINT | grep -v '^loop' | grep ' disk$' | awk 'BEGIN{print "   NAME    SIZE TYPE MOUNTPOINT"} 1' | nl -w2 -s') '
     
-    read -e -rp "请输入要操作的磁盘编号 (或 q 返回): " idx
+    read -e -rp "请输入要操作的磁盘编号 (或输入q返回): " idx
     [[ "$idx" == "q" ]] && return
     
-    # 正确获取设备名
-    dev=$(lsblk -e 7,128,252,253 -no NAME | grep -v '^loop' | sed -n "${idx}p")
-    [[ -z "$dev" ]] && { warn "无效编号"; continue; }
+    # 仅获取物理磁盘设备名
+    dev=$(lsblk -e 7,128,252,253 -no NAME,TYPE | grep -v '^loop' | grep ' disk$' | awk '{print $1}' | sed -n "${idx}p")
+    [[ -z "$dev" ]] && { warn "无效编号，请输入列表中的磁盘编号"; continue; }
     
     mountpoint=$(lsblk -no MOUNTPOINT "/dev/$dev")
     if [[ -n "$mountpoint" ]]; then
       warn "警告：/dev/$dev 已挂载到 $mountpoint，操作将导致数据丢失！"
-      read -e -rp "是否继续? [y/N]: " force_confirm
-      [[ ! "$force_confirm" =~ ^[Yy]$ ]] && { warn "操作取消"; continue; }
+      read -e -rp "是否继续? [y/N/q]: " force_confirm
+      [[ "$force_confirm" == "q" || ! "$force_confirm" =~ ^[Yy]$ ]] && { warn "操作取消"; continue; }
     fi
     
-    read -e -rp "确认要对 /dev/$dev 进行分区? [y/N]: " confirm
-    [[ ! "$confirm" =~ ^[Yy]$ ]] && { warn "操作取消"; return; }
+    read -e -rp "确认要对 /dev/$dev 进行分区? [y/N/q]: " confirm
+    [[ "$confirm" == "q" || ! "$confirm" =~ ^[Yy]$ ]] && { warn "操作取消"; return; }
     
     log "正在分区 /dev/$dev..."
     parted /dev/"$dev" --script mklabel gpt mkpart primary ext4 1MiB 100%
     mkfs.ext4 /dev/"${dev}"1
     
-    read -e -rp "请输入挂载点 (默认: $BASE_DIR): " mnt
+    read -e -rp "请输入挂载点 (默认: $BASE_DIR，或输入q返回): " mnt
+    [[ "$mnt" == "q" ]] && return
     mnt=${mnt:-$BASE_DIR}
     
     mkdir -p "$mnt" && mount /dev/"${dev}"1 "$mnt"
@@ -657,19 +698,21 @@ deploy_containers(){
     echo -e "\n部署容器选项："
     echo "1) 使用默认 compose 文件"
     echo "2) 手动输入 compose 文件 URL"
-    echo "3) 返回主菜单"
+    echo "3) 返回主菜单 (或输入q)"
     read -e -rp "选择: " o
     
+    [[ "$o" == "q" ]] && return
+    
     case "$o" in
-      1) 网站="$DEFAULT_COMPOSE_URL"; break ;;
-      2) read -e -rp "请输入 compose 文件 URL: " URL; break ;;
+      1) URL="$DEFAULT_COMPOSE_URL"; break ;;
+      2) read -e -rp "请输入 compose 文件 URL (或输入q返回): " URL; [[ "$URL" == "q" ]] && return; break ;;
       3) return ;;
-      *) warn "无效选项，请重试" ;;
+      *) warn "无效选项，请重试（或输入q返回）" ;;
     esac
   done
   
   if [[ "$URL" =~ github\.com/.*/blob/.* ]]; then
-    网站="${URL/\/blob\//\/raw\/}"
+    URL="${URL/\/blob\//\/raw\/}"
     log "已转换为 Raw URL: $URL"
   fi
   
@@ -684,7 +727,7 @@ deploy_containers(){
   log "容器部署完成"
 }
 
-# Docker 一键运维（增加单个容器操作）
+# Docker 一键运维（支持单个容器操作）
 docker_one_click(){
   while true; do
     echo -e "\n====== Docker 运维 ======"
@@ -693,8 +736,10 @@ docker_one_click(){
     echo "3) 重启所有运行中的容器"
     echo "4) 停止所有运行中的容器"
     echo "5) 清理无用镜像和容器"
-    echo "6) 返回主菜单"
+    echo "6) 返回主菜单 (或输入q)"
     read -e -rp "选择: " opt
+    
+    [[ "$opt" == "q" ]] && return
     
     case "$opt" in
       1) 
@@ -707,27 +752,30 @@ docker_one_click(){
       3) 
         log "重启所有运行中的容器..."
         docker restart $(docker ps -q) 
+        read -e -rp "操作完成，按Enter键继续..."
         ;;
       4) 
         log "停止所有运行中的容器..."
         docker stop $(docker ps -q) 
+        read -e -rp "操作完成，按Enter键继续..."
         ;;
       5) 
         log "正在清理无用资源..."
         docker system prune -a -f --volumes
         log "清理完成"
+        read -e -rp "按Enter键继续..."
         ;;
       6) 
         return 
         ;;
       *) 
-        warn "无效选项，请重试" 
+        warn "无效选项，请重试（或输入q返回）" 
         ;;
     esac
   done
 }
 
-# 新增：管理单个容器
+# 管理单个容器
 manage_single_container() {
   if ! command -v docker &>/dev/null; then
     error "未检测到Docker，请先安装"
@@ -739,17 +787,21 @@ manage_single_container() {
   
   if [[ -z "$containers" ]]; then
     log "未检测到任何容器"
+    read -e -rp "按Enter键返回..."
     return 0
   fi
   
   echo -e "\n容器列表："
   echo "$containers" | nl -w2 -s') '
   
-  read -e -rp "请输入要操作的容器编号: " idx
+  read -e -rp "请输入要操作的容器编号 (或输入q返回): " idx
+  [[ "$idx" == "q" ]] && return
+  
   container_info=$(echo "$containers" | sed -n "${idx}p")
   
   if [[ -z "$container_info" ]]; then
     warn "无效的容器编号"
+    read -e -rp "按Enter键继续..."
     return 1
   fi
   
@@ -766,21 +818,26 @@ manage_single_container() {
     echo "4) 查看容器日志"
     echo "5) 进入容器终端"
     echo "6) 删除容器"
-    echo "7) 返回上一级"
+    echo "7) 返回上一级 (或输入q)"
     read -e -rp "选择操作: " action
+    
+    [[ "$action" == "q" ]] && return
     
     case "$action" in
       1)
         log "启动容器 $container_name..."
         docker start "$container_id"
+        read -e -rp "操作完成，按Enter键继续..."
         ;;
       2)
         log "停止容器 $container_name..."
         docker stop "$container_id"
+        read -e -rp "操作完成，按Enter键继续..."
         ;;
       3)
         log "重启容器 $container_name..."
         docker restart "$container_id"
+        read -e -rp "操作完成，按Enter键继续..."
         ;;
       4)
         log "容器 $container_name 的日志（最后100行）："
@@ -788,7 +845,7 @@ manage_single_container() {
         read -e -rp "按Enter键继续..."
         ;;
       5)
-        log "进入容器 $container_name 的终端..."
+        log "进入容器 $container_name 的终端（输入exit退出）..."
         if docker exec -it "$container_id" /bin/bash; then
           log "已退出容器终端"
         else
@@ -796,9 +853,11 @@ manage_single_container() {
           docker exec -it "$container_id" /bin/sh
           log "已退出容器终端"
         fi
+        read -e -rp "按Enter键继续..."
         ;;
       6)
-        read -e -rp "确定要删除容器 $container_name 吗? [y/N]: " confirm
+        read -e -rp "确定要删除容器 $container_name 吗? [y/N/q]: " confirm
+        [[ "$confirm" == "q" ]] && return
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
           # 先停止容器（如果正在运行）
           if docker ps --format '{{.ID}}' | grep -q "$container_id"; then
@@ -808,12 +867,13 @@ manage_single_container() {
           log "删除容器 $container_name..."
           docker rm "$container_id"
         fi
+        read -e -rp "操作完成，按Enter键继续..."
         ;;
       7)
         return
         ;;
       *)
-        warn "无效选项，请重试"
+        warn "无效选项，请重试（或输入q返回）"
         ;;
     esac
   done
@@ -838,13 +898,14 @@ log_rotate(){
   
   while true; do
     echo -e "\n====== 日志清理设置 ======"
-    read -e -rp "请输入日志保留天数 (1-7天，默认7天): " log_days
+    read -e -rp "请输入日志保留天数 (1-7天，默认7天，或输入q返回): " log_days
+    [[ "$log_days" == "q" ]] && return
     log_days=${log_days:-$DEFAULT_LOG_DAYS}
     
     if [[ "$log_days" =~ ^[1-7]$ ]]; then
       break
     else
-      warn "无效输入，请输入1到7之间的数字"
+      warn "无效输入，请输入1到7之间的数字（或输入q返回）"
     fi
   done
   
@@ -860,7 +921,7 @@ log_rotate(){
 
 # 主菜单
 while true; do
-  echo -e "\n====== N100 AIO 初始化 v0.22 ======"
+  echo -e "\n====== N100 AIO 初始化 v0.23 ======"
   echo "1) 环境检测"
   echo "2) 网络管理"
   echo "3) SSH 管理"
@@ -876,7 +937,7 @@ while true; do
   read -e -rp "请选择操作 [1-11/q]: " ch
   
   case "$ch" in
-    1) env_check ;;
+    1) env_check; read -e -rp "按Enter键返回主菜单..." ;;
     2) network_menu ;;
     3) ssh_menu ;;
     4) partition_disk ;;
@@ -884,9 +945,9 @@ while true; do
     6) install_docker ;;
     7) deploy_containers ;;
     8) docker_one_click ;;
-    9) update_system ;;
-    10) log_rotate ;;
-    11) display_help ;;
+    9) update_system; read -e -rp "按Enter键返回主菜单..." ;;
+    10) log_rotate; read -e -rp "按Enter键返回主菜单..." ;;
+    11) display_help; read -e -rp "按Enter键返回主菜单..." ;;
     q) log "退出脚本"; break ;;
     *) warn "无效选项，请输入1-11或q" ;;
   esac
