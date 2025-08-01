@@ -365,3 +365,66 @@ while true; do
       while true; do
         echo -e "\n--- 磁盘分区与挂载 ---"
         echo "1) 列出磁盘/
+        挂载"
+echo "2) 分区并格式化"
+echo "3) 自动挂载并写入fstab"
+echo "q) 返回主菜单"
+read -e -rp "请选择: " disk_opt
+case "$disk_opt" in
+1) lsblk -f ;;
+2) partition_disk ;;
+3) mount_disk_and_fstab ;;
+q) break ;;
+*) warn "无效选项";;
+esac
+done
+;;
+4) # Docker 管理
+while true; do
+echo -e "\n--- Docker 管理 ---"
+echo "1) 安装 Docker"
+echo "2) Docker 一键运维"
+echo "q) 返回主菜单"
+read -e -rp "请选择: " dock_opt
+case "$dock_opt" in
+1) install_docker ;;
+2) docker_one_click ;;
+q) break ;;
+*) warn "无效选项";;
+esac
+done
+;;
+5) # 容器部署
+while true; do
+echo -e "\n--- 容器部署 ---"
+echo "1) 默认 Compose URL 部署"
+echo "2) 手动输入 Compose URL 部署"
+echo "q) 返回主菜单"
+read -e -rp "请选择: " dep_opt
+case "$dep_opt" in
+1) deploy_containers "default" ;;
+2) deploy_containers "manual" ;;
+q) break ;;
+*) warn "无效选项";;
+esac
+done
+;;
+6) # 系统更新与清理
+while true; do
+echo -e "\n--- 系统更新与清理 ---"
+echo "1) 系统更新与升级"
+echo "2) Docker 日志轮转与清理"
+echo "q) 返回主菜单"
+read -e -rp "请选择: " sys_opt
+case "$sys_opt" in
+1) update_system ;;
+2) log_rotate ;;
+q) break ;;
+*) warn "无效选项";;
+esac
+done
+;;
+q) log "退出脚本"; break ;;
+*) warn "无效选项";;
+esac
+done
