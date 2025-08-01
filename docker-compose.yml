@@ -4,7 +4,7 @@ services:
   # qBittorrent下载器 EE增强版 独立桥接网络（download_net）端口 8080
   qbittorrentee:
     #image: lscr.io/linuxserver/qbittorrent:latest 官方版
-    image: superng6/qbittorrentee
+    image: uperng6/qbittorrentee
     container_name: qbittorrentee
     networks:
       - download_net
@@ -15,8 +15,8 @@ services:
       - WEBUI_PORT=8080
       - ENABLE_DOWNLOADS_PERM_FIX=true
     volumes:
-      - /mnt/usbdata/docker/qbittorrent/config:/config
-      - /mnt/usbdata/media/downloads:/downloads
+      - /mnt/data/docker/qbittorrent/config:/config
+      - /mnt/data/media/downloads:/downloads
     ports:
       - "8080:8080"
       - "6881:6881"
@@ -35,8 +35,8 @@ services:
       - PGID=1000
       - TZ=Asia/Shanghai
     volumes:
-      - /mnt/usbdata/docker/xunlei:/xunlei
-      - /mnt/usbdata/media/downloads:/downloads
+      - /mnt/data/docker/xunlei:/xunlei
+      - /mnt/data/media/downloads:/downloads
     ports:
       - "2345:2345"
     restart: unless-stopped
@@ -48,7 +48,7 @@ services:
     networks:
       - proxy_net
     volumes:
-      - /mnt/usbdata/docker/dashy/config/conf.yml:/app/user-data/conf.yml
+      - /mnt/data/docker/dashy/config/conf.yml:/app/user-data/conf.yml
     ports:
       - "8081:8080"
     environment:
@@ -83,8 +83,8 @@ services:
       - PUID=1000
       - PGID=1000
     volumes:
-      - /mnt/usbdata:/srv
-      - /mnt/usbdata/docker/filebrowser/config:/config
+      - /mnt/data:/srv
+      - /mnt/data/docker/filebrowser/config:/config
     ports:
       - "8082:80"
     restart: unless-stopped
@@ -96,7 +96,7 @@ services:
     networks:
       - proxy_net
     volumes:
-      - /mnt/usbdata/docker/bitwarden/data:/data
+      - /mnt/data/docker/bitwarden/data:/data
     ports:
       - 8083:80
     environment:
@@ -124,8 +124,8 @@ services:
       - PGID=1000
       - TZ=Asia/Shanghai
     volumes:
-      - /mnt/usbdata/docker/emby/config:/config
-      - /mnt/usbdata/media:/mnt/media
+      - /mnt/data/docker/emby/config:/config
+      - /mnt/data/media:/mnt/media
     #devices:
       #- /dev/dri:/dev/dri
     ports:
@@ -162,7 +162,7 @@ services:
       - POSTGRES_PASSWORD=metatube
       - POSTGRES_DB=metatube
     volumes:
-      - /mnt/usbdata/docker/metatube/postgres:/var/lib/postgresql/data
+      - /mnt/data/docker/metatube/postgres:/var/lib/postgresql/data
       - run:/var/run
     command: "-c TimeZone=Asia/Shanghai -c log_timezone=Asia/Shanghai -c listen_addresses='' -c unix_socket_permissions=0777"
     
