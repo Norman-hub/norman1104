@@ -1,5 +1,6 @@
-apt update  #更新软件包
-apt intall wget   #安装wget
+环境：Debian12 minimal
+apt update && apt install -y wget  #更新软件包并安装wget
+apt update && apt install -y curl  #更新软件包并安装wget
 wget  #下载
 rm  删除
 chmod +x #赋予执行权限
