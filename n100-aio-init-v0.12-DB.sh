@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------- #
-# N100 All-in-One 交互式初始化脚本 v0.16 优化版
-# 优化点：目录创建改为菜单选项、环境检测与目录操作分离、增加媒体目录管理
+# N100 All-in-One 交互式初始化脚本 v0.17 优化版
+# 优化点：修复磁盘信息显示逻辑，首次运行显示系统磁盘和未挂载磁盘，区分挂载状态
 # ---------------------------------------------------------------------------- #
 
 set -euo pipefail
@@ -63,7 +63,7 @@ MEDIA_DIRS=(
   "other"        # 其他
 )
 
-# 环境检测与系统信息展示（不含目录创建）
+# 环境检测与系统信息展示（修复磁盘信息显示逻辑）
 env_check(){
   # 基础系统信息
   . /etc/os-release
@@ -80,25 +80,45 @@ env_check(){
   mem_available=$(free -h | awk '/^Mem:/ {print $7}')
   log "内存总量: $mem_total (可用: $mem_available)"
   
-  # 磁盘信息
-  log "磁盘信息 ($BASE_DIR):"
-  # 获取磁盘统计信息
-  disk_stats=$(df -h "$BASE_DIR" 2>/dev/null || df -h /)
-  disk_total=$(echo "$disk_stats" | awk 'NR==2 {print $2}')
-  disk_used=$(echo "$disk_stats" | awk 'NR==2 {print $3}')
-  disk_available=$(echo "$disk_stats" | awk 'NR==2 {print $4}')
-  disk_usage=$(echo "$disk_stats" | awk 'NR==2 {print $5}')
+  # 系统磁盘信息（根目录）
+  log "系统磁盘信息 (/) :"
+  root_disk_stats=$(df -h /)
+  root_total=$(echo "$root_disk_stats" | awk 'NR==2 {print $2}')
+  root_used=$(echo "$root_disk_stats" | awk 'NR==2 {print $3}')
+  root_available=$(echo "$root_disk_stats" | awk 'NR==2 {print $4}')
+  root_usage=$(echo "$root_disk_stats" | awk 'NR==2 {print $5}')
   
-  log "  总容量: $disk_total"
-  log "  已用空间: $disk_used ($disk_usage)"
-  log "  可用空间: $disk_available"
+  log "  总容量: $root_total"
+  log "  已用空间: $root_used ($root_usage)"
+  log "  可用空间: $root_available"
   
-  # 检查磁盘空间是否充足
-  avail_kb=$(df --output=avail "$BASE_DIR" 2>/dev/null | tail -1 || df --output=avail / | tail -1)
-  (( avail_kb < 5*1024*1024 )) && error "磁盘可用空间不足5GB" && exit 1
+  # 所有可用磁盘列表（排除loop设备）
+  log "\n所有可用磁盘（包括未分区/未挂载）:"
+  lsblk -e 7,128,252,253 -o NAME,SIZE,TYPE,MOUNTPOINT | grep -v '^loop'
+  
+  # 检查是否已挂载BASE_DIR
+  if [[ -d "$BASE_DIR" && "$(mount | grep "$BASE_DIR")" ]]; then
+    log "\n已挂载存储信息 ($BASE_DIR) :"
+    mount_disk_stats=$(df -h "$BASE_DIR")
+    mount_total=$(echo "$mount_disk_stats" | awk 'NR==2 {print $2}')
+    mount_used=$(echo "$mount_disk_stats" | awk 'NR==2 {print $3}')
+    mount_available=$(echo "$mount_disk_stats" | awk 'NR==2 {print $4}')
+    mount_usage=$(echo "$mount_disk_stats" | awk 'NR==2 {print $5}')
+    
+    log "  总容量: $mount_total"
+    log "  已用空间: $mount_used ($mount_usage)"
+    log "  可用空间: $mount_available"
+  else
+    warn "\n未检测到已挂载的存储设备（$BASE_DIR 不存在或未挂载）"
+    warn "请通过 4) 磁盘分区 & 挂载 选项配置存储设备"
+  fi
+  
+  # 磁盘空间检查（基于根目录，确保系统有足够空间）
+  root_avail_kb=$(df --output=avail / | tail -1)
+  (( root_avail_kb < 5*1024*1024 )) && error "系统磁盘可用空间不足5GB" && exit 1
   
   # 主机信息
-  log "主机名: $(hostname)"
+  log "\n主机名: $(hostname)"
   log "当前时间: $(date "+%Y-%m-%d %H:%M:%S")"
   
   log "系统信息检测完成"
@@ -136,6 +156,11 @@ manage_directories(){
 
 # 创建基础目录结构
 create_base_directories(){
+  if [[ ! -d "$BASE_DIR" ]]; then
+    warn "未检测到基础存储目录 $BASE_DIR，请先分区并挂载存储设备"
+    return 1
+  fi
+  
   log "创建基础目录结构..."
   mkdir -p \
     "$BASE_DIR" \
@@ -150,9 +175,14 @@ create_base_directories(){
 
 # 创建常用媒体目录
 create_media_directories(){
+  if [[ ! -d "$BASE_DIR" ]]; then
+    warn "未检测到基础存储目录 $BASE_DIR，请先分区并挂载存储设备"
+    return 1
+  fi
+  
   if [[ ! -d "$BASE_DIR/media" ]]; then
     warn "未检测到基础媒体目录，先创建基础目录结构"
-    create_base_directories
+    create_base_directories || return 1
   fi
   
   log "创建常用媒体目录..."
@@ -166,12 +196,13 @@ create_media_directories(){
 
 # 查看现有目录结构
 view_directories(){
-  log "当前目录结构 ($BASE_DIR):"
-  if [[ -d "$BASE_DIR" ]]; then
-    tree -L 3 "$BASE_DIR" || ls -lR "$BASE_DIR" | head -n 50
-  else
-    warn "基础目录 $BASE_DIR 不存在，请先创建目录结构"
+  if [[ ! -d "$BASE_DIR" ]]; then
+    warn "未检测到基础存储目录 $BASE_DIR，请先分区并挂载存储设备"
+    return 1
   fi
+  
+  log "当前目录结构 ($BASE_DIR):"
+  tree -L 3 "$BASE_DIR" || ls -lR "$BASE_DIR" | head -n 50
 }
 
 # 检测IP
@@ -348,13 +379,21 @@ partition_disk(){
   
   while true; do
     echo -e "\n可用磁盘列表："
-    lsblk -dn -o NAME,SIZE | nl
+    lsblk -e 7,128,252,253 -o NAME,SIZE,TYPE,MOUNTPOINT | grep -v '^loop' | nl
     
     read -e -rp "请输入要操作的磁盘编号 (或 q 返回): " idx
     [[ "$idx" == "q" ]] && return
     
-    dev=$(lsblk -dn -o NAME | sed -n "${idx}p")
+    dev=$(lsblk -e 7,128,252,253 -no NAME | grep -v '^loop' | sed -n "${idx}p")
     [[ -z "$dev" ]] && { warn "无效编号"; continue; }
+    
+    # 检查磁盘是否已挂载
+    mountpoint=$(lsblk -no MOUNTPOINT "/dev/$dev")
+    if [[ -n "$mountpoint" ]]; then
+      warn "警告：/dev/$dev 已挂载到 $mountpoint，操作将导致数据丢失！"
+      read -e -rp "是否继续? [y/N]: " force_confirm
+      [[ ! "$force_confirm" =~ ^[Yy]$ ]] && { warn "操作取消"; continue; }
+    fi
     
     read -e -rp "确认要对 /dev/$dev 进行分区? [y/N]: " confirm
     [[ ! "$confirm" =~ ^[Yy]$ ]] && { warn "操作取消"; return; }
@@ -364,9 +403,9 @@ partition_disk(){
     parted /dev/"$dev" --script mklabel gpt mkpart primary ext4 1MiB 100%
     mkfs.ext4 /dev/"${dev}"1
     
-    # 挂载点设置
-    read -e -rp "请输入挂载点 (例如 /mnt/data): " mnt
-    [[ -z "$mnt" ]] && { warn "挂载点不能为空"; continue; }
+    # 挂载点设置（默认使用BASE_DIR）
+    read -e -rp "请输入挂载点 (默认: $BASE_DIR): " mnt
+    mnt=${mnt:-$BASE_DIR}
     
     mkdir -p "$mnt" && mount /dev/"${dev}"1 "$mnt"
     
@@ -404,6 +443,11 @@ install_docker(){
 
 # 部署容器
 deploy_containers(){
+  if [[ ! -d "$BASE_DIR" || ! "$(mount | grep "$BASE_DIR")" ]]; then
+    error "未检测到已挂载的存储设备，请先通过 4) 磁盘分区 & 挂载 配置存储"
+    return 1
+  fi
+  
   if ! command -v curl &>/dev/null; then
     log "安装 curl..."
     apt-get update && apt-get install -y curl
@@ -425,7 +469,7 @@ deploy_containers(){
     read -e -rp "选择: " o
     
     case "$o" in
-      1) 网站="$DEFAULT_COMPOSE_URL"; break ;;
+      1) URL="$DEFAULT_COMPOSE_URL"; break ;;
       2) read -e -rp "请输入 compose 文件 URL: " URL; break ;;
       3) return ;;
       *) warn "无效选项，请重试" ;;
@@ -434,7 +478,7 @@ deploy_containers(){
   
   # GitHub URL转换
   if [[ "$URL" =~ github\.com/.*/blob/.* ]]; then
-    网站="${URL/\/blob\//\/raw\/}"
+    URL="${URL/\/blob\//\/raw\/}"
     log "已转换为 Raw URL: $URL"
   fi
   
@@ -522,7 +566,7 @@ log_rotate(){
 
 # 主菜单
 while true; do
-  echo -e "\n====== N100 AIO 初始化 v0.16 ======"
+  echo -e "\n====== N100 AIO 初始化 v0.17 ======"
   echo "1) 环境检测"
   echo "2) 网络管理"
   echo "3) SSH 管理"
