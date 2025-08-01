@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------- #
 # N100 All-in-One 交互式初始化脚本 v0.24 增强版
-# 修复点：调整Dashy配置目录路径、移除帮助菜单、优化用户体验
+# 修复点：修复磁盘列表显示问题、调整Dashy配置目录、移除帮助菜单
 # ---------------------------------------------------------------------------- #
 
 set -euo pipefail
@@ -25,7 +25,6 @@ fi
 # 全局变量
 BASE_DIR="/mnt/data"
 COMPOSE_DIR="$BASE_DIR/docker/compose"
-# 修正Dashy配置目录为容器内对应的配置文件夹
 DASHY_CONFIG_DIR="$BASE_DIR/docker/dashy/config"
 DASHY_CONF_DEFAULT_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/Dashy-conf.yml"
 MOUNTS=(/mnt/data1 /mnt/data2 /mnt/data3)
@@ -94,7 +93,7 @@ env_check(){
   log "系统信息检测完成"
 }
 
-# 目录结构管理函数（含Dashy配置下载）
+# 目录结构管理函数
 manage_directories(){
   while true; do
     echo -e "\n====== 目录结构管理 ======"
@@ -105,7 +104,6 @@ manage_directories(){
     echo "5) 返回主菜单 (或输入q)"
     read -e -rp "选择: " dir_opt
     
-    # 支持q键返回
     [[ "$dir_opt" == "q" ]] && return
     
     case "$dir_opt" in
@@ -119,9 +117,8 @@ manage_directories(){
   done
 }
 
-# 下载Dashy配置文件（调整到容器配置目录）
+# 下载Dashy配置文件
 download_dashy_config() {
-  # 确保Dashy配置目录存在（容器内对应的配置文件夹）
   if [[ ! -d "$DASHY_CONFIG_DIR" ]]; then
     warn "未检测到Dashy配置目录，正在创建: $DASHY_CONFIG_DIR"
     mkdir -p "$DASHY_CONFIG_DIR" || {
@@ -137,7 +134,6 @@ download_dashy_config() {
     echo "3) 返回上一级 (或输入q)"
     read -e -rp "选择: " opt
     
-    # 支持q键返回
     [[ "$opt" == "q" ]] && return
     
     case "$opt" in
@@ -163,7 +159,6 @@ download_dashy_config() {
   temp_file="$DASHY_CONFIG_DIR/Dashy-conf.yml"
   
   if curl -fsSL "$url" -o "$temp_file"; then
-    # 重命名为conf.yml（Dashy容器默认配置文件名）
     mv -f "$temp_file" "$DASHY_CONFIG_DIR/conf.yml"
     log "配置文件已下载并保存至: $DASHY_CONFIG_DIR/conf.yml"
   else
@@ -184,7 +179,7 @@ create_base_directories(){
     "$BASE_DIR" \
     "$COMPOSE_DIR" \
     "$BASE_DIR/docker/configs" \
-    "$DASHY_CONFIG_DIR"  # 确保创建Dashy容器配置目录
+    "$DASHY_CONFIG_DIR" \
     "$BASE_DIR/docker/data" \
     "$BASE_DIR/media"
   
@@ -238,7 +233,6 @@ network_menu(){
     echo "4) 返回主菜单 (或输入q)"
     read -e -rp "选择: " nopt
     
-    # 支持q键返回
     [[ "$nopt" == "q" ]] && return
     
     case "$nopt" in
@@ -302,14 +296,12 @@ cleanup_duplicate_ips() {
   [[ "$ip_nums" == "q" ]] && return
   
   if [[ "$ip_nums" == "0" ]]; then
-    # 保留第一个IP，删除其余所有IP
     ips=$(ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+' | tail -n +2)
     for ip in $ips; do
       log "删除IP: $ip"
       ip addr del "$ip" dev "$iface"
     done
   else
-    # 删除指定编号的IP
     for num in $ip_nums; do
       ip=$(ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+' | sed -n "${num}p")
       if [[ -n "$ip" ]]; then
@@ -330,10 +322,8 @@ cleanup_interface() {
   local iface=$1
   log "正在彻底清理接口 $iface 的残留配置..."
   
-  # 1. 停止接口
   ifdown "$iface" 2>/dev/null || true
   
-  # 2. 清除所有IP地址
   existing_ips=$(ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+')
   if [[ -n "$existing_ips" ]]; then
     log "发现并清除以下现有IP:"
@@ -343,20 +333,14 @@ cleanup_interface() {
     done <<< "$existing_ips"
   fi
   
-  # 3. 清除接口路由
   ip route flush dev "$iface" 2>/dev/null || true
-  
-  # 4. 确保接口物理状态为up
   ip link set dev "$iface" up 2>/dev/null || true
-  
-  # 5. 移除可能的冲突配置文件
   rm -f "/etc/network/interfaces.d/${iface}.*" 2>/dev/null || true
   
   log "接口 $iface 清理完成"
 }
 
 network_config(){
-  # 检查并处理所有网络管理服务冲突
   local conflict_services=("NetworkManager" "systemd-networkd")
   for service in "${conflict_services[@]}"; do
     if systemctl is-active --quiet "$service"; then
@@ -382,7 +366,6 @@ network_config(){
     echo "3) 返回上一级 (或输入q)"
     read -e -rp "选择: " opt
     
-    # 支持q键返回
     [[ "$opt" == "q" ]] && return
     
     case "$opt" in
@@ -390,18 +373,15 @@ network_config(){
         iface=$(ip -o link show | awk -F': ' '/state UP/ {print $2}' | head -1)
         [[ -z "$iface" ]] && { warn "无可用接口"; continue; }
         
-        # 增强版清理流程
         cleanup_interface "$iface"
         
         log "应用DHCP配置到接口 $iface..."
-        # 生成DHCP配置
         cat >"/etc/network/interfaces.d/$iface.cfg" <<EOF
 auto $iface
 iface $iface inet dhcp
 dns-nameservers 8.8.8.8 114.114.114.114
 EOF
         
-        # 启动接口
         if ifup "$iface"; then
           log "DHCP 配置应用完成"
           log "分配的IP地址:"
@@ -426,12 +406,10 @@ EOF
           warn "IP格式错误（示例：192.168.1.100/24）"; continue
         fi
         
-        # 提取IP和CIDR前缀
         ip_addr=$(echo "$sip" | cut -d'/' -f1)
         cidr=$(echo "$sip" | cut -d'/' -f2)
         netmask=$(calculate_netmask "$cidr")
         
-        # 检查该IP是否已存在
         if ip -4 addr show | grep -q "$ip_addr/"; then
           warn "警告：IP地址 $ip_addr 已在其他接口上使用"
           read -e -rp "是否继续使用此IP? [y/N/q]: " cont
@@ -448,11 +426,9 @@ EOF
         [[ "$dns" == "q" ]] && return
         dns=${dns:-"8.8.8.8 114.114.114.114"}
         
-        # 增强版清理流程
         cleanup_interface "$iface"
         
         log "应用静态IP配置到接口 $iface..."
-        # 生成静态IP配置
         cat >"/etc/network/interfaces.d/$iface.cfg" <<EOF
 auto $iface
 iface $iface inet static
@@ -462,13 +438,11 @@ iface $iface inet static
   dns-nameservers $dns
 EOF
         
-        # 启动接口
         if ifup "$iface"; then
           log "静态IP 配置应用完成"
           log "配置的IP地址:"
           ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+'
           
-          # 检查是否仍然存在多个IP
           ip_count=$(ip -4 addr show "$iface" | grep -c 'inet ')
           if (( ip_count > 1 )); then
             warn "检测到仍然存在多个IP地址"
@@ -508,23 +482,19 @@ ssh_menu(){
     echo "4) 返回主菜单 (或输入q)"
     read -e -rp "选择: " sopt
     
-    # 支持q键返回
     [[ "$sopt" == "q" ]] && return
     
     case "$sopt" in
       1) 
         check_ssh_status 
-        # 强化暂停机制，确保不会退出到主菜单
         read -e -rp "按Enter键返回SSH管理菜单..."
         ;;
       2) 
         install_ssh 
-        # 操作完成后暂停，避免直接返回
         read -e -rp "操作完成，按Enter键继续..."
         ;;
       3) 
         configure_root_ssh 
-        # 操作完成后暂停，避免直接返回
         read -e -rp "操作完成，按Enter键继续..."
         ;;
       4) 
@@ -586,7 +556,7 @@ configure_root_ssh(){
   log "SSH配置已更新：允许root密码登录"
 }
 
-# 磁盘分区 & 挂载
+# 磁盘分区 & 挂载（修复版）
 partition_disk(){
   if ! command -v parted &>/dev/null; then
     log "安装 parted..."
@@ -594,17 +564,30 @@ partition_disk(){
   fi
   
   while true; do
-    echo -e "\n可用磁盘列表（仅显示物理磁盘，不包含分区）："
-    # 仅显示物理磁盘（TYPE为disk），排除分区，修复编号问题
-    lsblk -e 7,128,252,253 -o NAME,SIZE,TYPE,MOUNTPOINT | grep -v '^loop' | grep ' disk$' | awk 'BEGIN{print "   NAME    SIZE TYPE MOUNTPOINT"} 1' | nl -w2 -s') '
+    # 获取物理磁盘列表（修复过滤逻辑）
+    local disk_list
+    disk_list=$(lsblk -e 7,128,252,253 -o NAME,SIZE,TYPE,MOUNTPOINT | grep -v '^loop' | grep -E ' disk$| part$')
+    
+    echo -e "\n可用磁盘列表（物理磁盘和分区）："
+    if [[ -z "$disk_list" ]]; then
+      echo "  未检测到可用磁盘设备"
+      read -e -rp "按Enter键返回主菜单..."
+      return 1
+    fi
+    
+    # 显示带编号的磁盘列表
+    echo "$disk_list" | awk 'BEGIN{print "   NAME    SIZE TYPE MOUNTPOINT"} 1' | nl -w2 -s') '
     
     read -e -rp "请输入要操作的磁盘编号 (或输入q返回): " idx
     [[ "$idx" == "q" ]] && return
     
-    # 仅获取物理磁盘设备名
-    dev=$(lsblk -e 7,128,252,253 -no NAME,TYPE | grep -v '^loop' | grep ' disk$' | awk '{print $1}' | sed -n "${idx}p")
+    # 获取用户选择的磁盘
+    local dev
+    dev=$(echo "$disk_list" | sed -n "${idx}p" | awk '{print $1}')
     [[ -z "$dev" ]] && { warn "无效编号，请输入列表中的磁盘编号"; continue; }
     
+    # 检查是否已挂载
+    local mountpoint
     mountpoint=$(lsblk -no MOUNTPOINT "/dev/$dev")
     if [[ -n "$mountpoint" ]]; then
       warn "警告：/dev/$dev 已挂载到 $mountpoint，操作将导致数据丢失！"
@@ -625,6 +608,7 @@ partition_disk(){
     
     mkdir -p "$mnt" && mount /dev/"${dev}"1 "$mnt"
     
+    local uuid
     uuid=$(blkid -s UUID -o value /dev/"${dev}"1)
     echo "UUID=$uuid $mnt ext4 defaults 0 2" >> /etc/fstab
     
@@ -706,7 +690,7 @@ deploy_containers(){
   log "容器部署完成"
 }
 
-# Docker 一键运维（支持单个容器操作）
+# Docker 一键运维
 docker_one_click(){
   while true; do
     echo -e "\n====== Docker 运维 ======"
@@ -761,7 +745,7 @@ manage_single_container() {
     return 1
   fi
   
-  # 获取所有容器列表
+  local containers
   containers=$(docker ps -a --format "{{.ID}} {{.Names}} {{.Status}}")
   
   if [[ -z "$containers" ]]; then
@@ -776,6 +760,7 @@ manage_single_container() {
   read -e -rp "请输入要操作的容器编号 (或输入q返回): " idx
   [[ "$idx" == "q" ]] && return
   
+  local container_info
   container_info=$(echo "$containers" | sed -n "${idx}p")
   
   if [[ -z "$container_info" ]]; then
@@ -784,6 +769,7 @@ manage_single_container() {
     return 1
   fi
   
+  local container_id container_name
   container_id=$(echo "$container_info" | awk '{print $1}')
   container_name=$(echo "$container_info" | awk '{print $2}')
   
@@ -838,7 +824,6 @@ manage_single_container() {
         read -e -rp "确定要删除容器 $container_name 吗? [y/N/q]: " confirm
         [[ "$confirm" == "q" ]] && return
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
-          # 先停止容器（如果正在运行）
           if docker ps --format '{{.ID}}' | grep -q "$container_id"; then
             log "停止容器 $container_name..."
             docker stop "$container_id"
@@ -898,7 +883,7 @@ log_rotate(){
   log "日志清理完成，已保留最近${log_days}天的日志"
 }
 
-# 主菜单（移除帮助菜单选项）
+# 主菜单
 while true; do
   echo -e "\n====== N100 AIO 初始化 v0.24 ======"
   echo "1) 环境检测"
