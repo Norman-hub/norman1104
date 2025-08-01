@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------- #
-# N100 All-in-One 交互式初始化脚本 v0.23 增强版
-# 修复点：磁盘编号显示、统一q键返回、Dashy配置目录调整、SSH状态退出问题
+# N100 All-in-One 交互式初始化脚本 v0.24 增强版
+# 修复点：调整Dashy配置目录路径、移除帮助菜单、优化用户体验
 # ---------------------------------------------------------------------------- #
 
 set -euo pipefail
@@ -16,38 +16,17 @@ log(){ echo -e "${GREEN}[INFO]${NC} $*"; }
 warn(){ echo -e "${YELLOW}[WARN]${NC} $*"; }
 error(){ echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
-# 帮助信息
-display_help(){
-  cat <<EOF
-使用方法: $0 [选项]
-选项:
-  -h        显示帮助信息
-功能:
-  环境检测
-  网络检测与配置
-  SSH 管理 (状态查看与配置)
-  磁盘分区 & 挂载
-  目录结构创建与管理
-  安装 Docker
-  部署容器
-  Docker 一键运维
-  系统更新与升级
-  日志轮转与清理（可设置自动清理时间）
-EOF
-}
-
 # 根权限检测
 if [[ $EUID -ne 0 ]]; then
   error "请使用 root 或 sudo 运行此脚本"
   exit 1
 fi
-[[ "${1:-}" == "-h" ]] && display_help && exit 0
 
 # 全局变量
 BASE_DIR="/mnt/data"
 COMPOSE_DIR="$BASE_DIR/docker/compose"
-# Dashy配置目录调整为容器对应的配置目录
-DASHY_CONFIG_DIR="$BASE_DIR/docker/configs/dashy"
+# 修正Dashy配置目录为容器内对应的配置文件夹
+DASHY_CONFIG_DIR="$BASE_DIR/docker/dashy/config"
 DASHY_CONF_DEFAULT_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/Dashy-conf.yml"
 MOUNTS=(/mnt/data1 /mnt/data2 /mnt/data3)
 DEFAULT_COMPOSE_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml"
@@ -142,7 +121,7 @@ manage_directories(){
 
 # 下载Dashy配置文件（调整到容器配置目录）
 download_dashy_config() {
-  # 确保Dashy配置目录存在
+  # 确保Dashy配置目录存在（容器内对应的配置文件夹）
   if [[ ! -d "$DASHY_CONFIG_DIR" ]]; then
     warn "未检测到Dashy配置目录，正在创建: $DASHY_CONFIG_DIR"
     mkdir -p "$DASHY_CONFIG_DIR" || {
@@ -184,7 +163,7 @@ download_dashy_config() {
   temp_file="$DASHY_CONFIG_DIR/Dashy-conf.yml"
   
   if curl -fsSL "$url" -o "$temp_file"; then
-    # 重命名为conf.yml
+    # 重命名为conf.yml（Dashy容器默认配置文件名）
     mv -f "$temp_file" "$DASHY_CONFIG_DIR/conf.yml"
     log "配置文件已下载并保存至: $DASHY_CONFIG_DIR/conf.yml"
   else
@@ -205,7 +184,7 @@ create_base_directories(){
     "$BASE_DIR" \
     "$COMPOSE_DIR" \
     "$BASE_DIR/docker/configs" \
-    "$DASHY_CONFIG_DIR"  # 确保创建Dashy配置目录
+    "$DASHY_CONFIG_DIR"  # 确保创建Dashy容器配置目录
     "$BASE_DIR/docker/data" \
     "$BASE_DIR/media"
   
@@ -519,7 +498,7 @@ EOF
   done
 }
 
-# SSH 管理（修复查看状态后退出问题）
+# SSH 管理
 ssh_menu(){
   while true; do
     echo -e "\n====== SSH 管理 ======"
@@ -607,7 +586,7 @@ configure_root_ssh(){
   log "SSH配置已更新：允许root密码登录"
 }
 
-# 磁盘分区 & 挂载（修复编号显示问题）
+# 磁盘分区 & 挂载
 partition_disk(){
   if ! command -v parted &>/dev/null; then
     log "安装 parted..."
@@ -919,9 +898,9 @@ log_rotate(){
   log "日志清理完成，已保留最近${log_days}天的日志"
 }
 
-# 主菜单
+# 主菜单（移除帮助菜单选项）
 while true; do
-  echo -e "\n====== N100 AIO 初始化 v0.23 ======"
+  echo -e "\n====== N100 AIO 初始化 v0.24 ======"
   echo "1) 环境检测"
   echo "2) 网络管理"
   echo "3) SSH 管理"
@@ -932,9 +911,8 @@ while true; do
   echo "8) Docker 一键运维"
   echo "9) 系统更新与升级"
   echo "10) 日志轮转与清理（可设置自动清理时间）"
-  echo "11) 显示帮助信息"
   echo "q) 退出脚本"
-  read -e -rp "请选择操作 [1-11/q]: " ch
+  read -e -rp "请选择操作 [1-10/q]: " ch
   
   case "$ch" in
     1) env_check; read -e -rp "按Enter键返回主菜单..." ;;
@@ -947,9 +925,8 @@ while true; do
     8) docker_one_click ;;
     9) update_system; read -e -rp "按Enter键返回主菜单..." ;;
     10) log_rotate; read -e -rp "按Enter键返回主菜单..." ;;
-    11) display_help; read -e -rp "按Enter键返回主菜单..." ;;
     q) log "退出脚本"; break ;;
-    *) warn "无效选项，请输入1-11或q" ;;
+    *) warn "无效选项，请输入1-10或q" ;;
   esac
 done
 
