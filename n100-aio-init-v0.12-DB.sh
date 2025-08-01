@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------- #
-# N100 All-in-One 交互式初始化脚本 v0.18 优化版
-# 优化点：默认挂载点改为/mnt/data，修复静态IP配置失败问题，增加DNS设置
+# N100 All-in-One 交互式初始化脚本 v0.19 优化版
+# 优化点：解决RTNETLINK配置冲突错误，修复子网掩码计算，增强接口状态处理
 # ---------------------------------------------------------------------------- #
 
 set -euo pipefail
@@ -43,39 +43,29 @@ if [[ $EUID -ne 0 ]]; then
 fi
 [[ "${1:-}" == "-h" ]] && display_help && exit 0
 
-# 全局变量 - 默认挂载点修改为/mnt/data
+# 全局变量 - 默认挂载点为/mnt/data
 BASE_DIR="/mnt/data"
 COMPOSE_DIR="$BASE_DIR/docker/compose"
 MOUNTS=(/mnt/data1 /mnt/data2 /mnt/data3)
 DEFAULT_COMPOSE_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml"
-# 日志保留天数默认值
 DEFAULT_LOG_DAYS=7
 
 # 常用媒体目录定义
 MEDIA_DIRS=(
-  "movies"       # 电影
-  "tvshows"      # 电视剧
-  "documentary"  # 纪录片
-  "anime"        # 动漫
-  "music"        # 音乐
-  "downloads"    # 下载
-  "photos"       # 照片
-  "other"        # 其他
+  "movies" "tvshows" "documentary" "anime" 
+  "music" "downloads" "photos" "other"
 )
 
 # 环境检测与系统信息展示
 env_check(){
-  # 基础系统信息
   . /etc/os-release
   log "操作系统: $PRETTY_NAME"
   log "内核版本: $(uname -r)"
   
-  # CPU信息
   local cpu_model=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed -e 's/^ *//')
   local cpu_cores=$(grep -c '^processor' /proc/cpuinfo)
   log "CPU: $cpu_model ($cpu_cores 核心)"
   
-  # 内存信息
   mem_total=$(free -h | awk '/^Mem:/ {print $2}')
   mem_available=$(free -h | awk '/^Mem:/ {print $7}')
   log "内存总量: $mem_total (可用: $mem_available)"
@@ -113,18 +103,16 @@ env_check(){
     warn "请通过 4) 磁盘分区 & 挂载 选项配置存储设备"
   fi
   
-  # 磁盘空间检查（基于根目录，确保系统有足够空间）
+  # 磁盘空间检查
   root_avail_kb=$(df --output=avail / | tail -1)
   (( root_avail_kb < 5*1024*1024 )) && error "系统磁盘可用空间不足5GB" && exit 1
   
-  # 主机信息
   log "\n主机名: $(hostname)"
   log "当前时间: $(date "+%Y-%m-%d %H:%M:%S")"
-  
   log "系统信息检测完成"
 }
 
-# 目录结构创建与管理
+# 目录结构管理函数（保持不变）
 manage_directories(){
   while true; do
     echo -e "\n====== 目录结构管理 ======"
@@ -135,26 +123,15 @@ manage_directories(){
     read -e -rp "选择: " dir_opt
     
     case "$dir_opt" in
-      1)
-        create_base_directories
-        ;;
-      2)
-        create_media_directories
-        ;;
-      3)
-        view_directories
-        ;;
-      4)
-        return
-        ;;
-      *)
-        warn "无效选项，请重试"
-        ;;
+      1) create_base_directories ;;
+      2) create_media_directories ;;
+      3) view_directories ;;
+      4) return ;;
+      *) warn "无效选项，请重试" ;;
     esac
   done
 }
 
-# 创建基础目录结构
 create_base_directories(){
   if [[ ! -d "$BASE_DIR" ]]; then
     warn "未检测到基础存储目录 $BASE_DIR，请先分区并挂载存储设备"
@@ -173,7 +150,6 @@ create_base_directories(){
   ls -ld "$BASE_DIR" "$COMPOSE_DIR" "$BASE_DIR/media"
 }
 
-# 创建常用媒体目录
 create_media_directories(){
   if [[ ! -d "$BASE_DIR" ]]; then
     warn "未检测到基础存储目录 $BASE_DIR，请先分区并挂载存储设备"
@@ -194,7 +170,6 @@ create_media_directories(){
   log "常用媒体目录创建完成"
 }
 
-# 查看现有目录结构
 view_directories(){
   if [[ ! -d "$BASE_DIR" ]]; then
     warn "未检测到基础存储目录 $BASE_DIR，请先分区并挂载存储设备"
@@ -211,7 +186,7 @@ detect_ip(){
   log "本机IP: $IP_ADDR"
 }
 
-# 网络检测与配置
+# 网络检测与配置（核心修复部分）
 network_menu(){
   while true; do
     echo -e "\n====== 网络管理 ======"
@@ -242,14 +217,39 @@ network_menu(){
   done
 }
 
+# 计算子网掩码（修复核心错误）
+calculate_netmask() {
+  local cidr=$1
+  # CIDR前缀转子网掩码（如24 → 255.255.255.0）
+  local netmask=""
+  for ((i=0; i<4; i++)); do
+    if (( cidr >= 8 )); then
+      netmask+="255."
+      ((cidr -= 8))
+    else
+      local bits=$(( 8 - cidr ))
+      local mask=$(( 256 - (1 << bits) ))
+      netmask+="${mask}."
+      cidr=0
+    fi
+  done
+  # 移除末尾的点
+  echo "${netmask%.*}"
+}
+
 network_config(){
-  # 检查是否存在NetworkManager冲突
+  # 检查并处理NetworkManager冲突
   if systemctl is-active --quiet NetworkManager; then
-    warn "检测到NetworkManager正在运行，可能与网络配置冲突"
-    read -e -rp "是否临时停止NetworkManager? [y/N]: " stop_nm
+    warn "检测到NetworkManager正在运行，这会导致网络配置冲突"
+    read -e -rp "是否停止并禁用NetworkManager? [y/N]: " stop_nm
     if [[ "$stop_nm" =~ ^[Yy]$ ]]; then
       systemctl stop NetworkManager
-      log "NetworkManager已停止"
+      systemctl disable NetworkManager
+      log "NetworkManager已停止并禁用"
+    else
+      warn "继续操作可能导致网络配置失败"
+      read -e -rp "是否继续? [y/N]: " cont
+      [[ ! "$cont" =~ ^[Yy]$ ]] && return
     fi
   fi
 
@@ -265,21 +265,26 @@ network_config(){
         iface=$(ip -o link show | awk -F': ' '/state UP/ {print $2}' | head -1)
         [[ -z "$iface" ]] && { warn "无可用接口"; continue; }
         
+        log "应用DHCP配置到接口 $iface..."
+        # 先清理现有配置
+        ifdown "$iface" || true
+        
         # 生成DHCP配置（包含DNS）
         cat >"/etc/network/interfaces.d/$iface.cfg" <<EOF
 auto $iface
 iface $iface inet dhcp
 dns-nameservers 8.8.8.8 114.114.114.114
 EOF
-        # 尝试重启网络服务，增加错误处理
-        if systemctl restart networking; then
+        
+        # 分步启动接口（解决RTNETLINK错误）
+        if ifup "$iface"; then
           log "DHCP 配置应用完成"
           log "新IP地址:"
           ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+'
         else
-          error "网络服务重启失败"
-          error "请查看日志: journalctl -xeu networking.service"
-          error "配置文件: /etc/network/interfaces.d/$iface.cfg"
+          error "接口启动失败"
+          error "请查看配置文件: /etc/network/interfaces.d/$iface.cfg"
+          error "尝试手动修复: ifdown $iface && ifup $iface"
         fi
         ;;
       2)
@@ -291,33 +296,47 @@ EOF
           warn "IP格式错误（示例：192.168.1.100/24）"; continue
         fi
         
+        # 提取IP和CIDR前缀
+        ip_addr=$(echo "$sip" | cut -d'/' -f1)
+        cidr=$(echo "$sip" | cut -d'/' -f2)
+        # 计算子网掩码（修复之前的错误计算）
+        netmask=$(calculate_netmask "$cidr")
+        
         read -e -rp "网关 (如 192.168.1.1): " gtw
         if ! echo "$gtw" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
           warn "网关格式错误"; continue
         fi
 
-        # 增加DNS配置（解决配置失败主因）
         read -e -rp "DNS服务器 (多个用空格分隔，默认: 8.8.8.8 114.114.114.114): " dns
         dns=${dns:-"8.8.8.8 114.114.114.114"}
         
-        # 生成静态IP配置（包含完整网络参数）
+        log "应用静态IP配置到接口 $iface..."
+        # 先清理现有配置（解决冲突核心步骤）
+        ifdown "$iface" || true
+        # 清除可能的残留路由
+        ip route flush dev "$iface" || true
+        
+        # 生成静态IP配置
         cat >"/etc/network/interfaces.d/$iface.cfg" <<EOF
 auto $iface
 iface $iface inet static
-  address $sip
+  address $ip_addr
+  netmask $netmask
   gateway $gtw
-  netmask $(echo "$sip" | awk -F'/' '{print 32 - $2}')
   dns-nameservers $dns
 EOF
-        # 尝试重启网络服务，增加错误处理
-        if systemctl restart networking; then
+        
+        # 分步启动接口（避免直接重启服务导致的冲突）
+        if ifup "$iface"; then
           log "静态IP 配置应用完成"
           log "配置信息:"
           grep -v '^#' "/etc/network/interfaces.d/$iface.cfg"
+          log "当前IP地址:"
+          ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+'
         else
-          error "网络服务重启失败"
-          error "请查看日志: journalctl -xeu networking.service"
-          error "配置文件: /etc/network/interfaces.d/$iface.cfg"
+          error "接口启动失败"
+          error "请查看配置文件: /etc/network/interfaces.d/$iface.cfg"
+          error "尝试手动修复: ifdown $iface && ifup $iface"
         fi
         ;;
       3)
@@ -330,7 +349,7 @@ EOF
   done
 }
 
-# SSH 管理
+# SSH 管理（保持不变）
 ssh_menu(){
   while true; do
     echo -e "\n====== SSH 管理 ======"
@@ -341,21 +360,11 @@ ssh_menu(){
     read -e -rp "选择: " sopt
     
     case "$sopt" in
-      1)
-        check_ssh_status
-        ;;
-      2)
-        install_ssh
-        ;;
-      3)
-        configure_root_ssh
-        ;;
-      4)
-        return
-        ;;
-      *)
-        warn "无效选项，请重试"
-        ;;
+      1) check_ssh_status ;;
+      2) install_ssh ;;
+      3) configure_root_ssh ;;
+      4) return ;;
+      *) warn "无效选项，请重试" ;;
     esac
   done
 }
@@ -409,7 +418,7 @@ configure_root_ssh(){
   log "SSH配置已更新：允许root密码登录"
 }
 
-# 磁盘分区 & 挂载（默认挂载点改为/mnt/data）
+# 磁盘分区 & 挂载（保持不变）
 partition_disk(){
   if ! command -v parted &>/dev/null; then
     log "安装 parted..."
@@ -426,7 +435,6 @@ partition_disk(){
     dev=$(lsblk -e 7,128,252,253 -no NAME | grep -v '^loop' | sed -n "${idx}p")
     [[ -z "$dev" ]] && { warn "无效编号"; continue; }
     
-    # 检查磁盘是否已挂载
     mountpoint=$(lsblk -no MOUNTPOINT "/dev/$dev")
     if [[ -n "$mountpoint" ]]; then
       warn "警告：/dev/$dev 已挂载到 $mountpoint，操作将导致数据丢失！"
@@ -437,18 +445,15 @@ partition_disk(){
     read -e -rp "确认要对 /dev/$dev 进行分区? [y/N]: " confirm
     [[ ! "$confirm" =~ ^[Yy]$ ]] && { warn "操作取消"; return; }
     
-    # 分区并格式化
     log "正在分区 /dev/$dev..."
     parted /dev/"$dev" --script mklabel gpt mkpart primary ext4 1MiB 100%
     mkfs.ext4 /dev/"${dev}"1
     
-    # 挂载点设置（默认使用/mnt/data）
     read -e -rp "请输入挂载点 (默认: $BASE_DIR): " mnt
     mnt=${mnt:-$BASE_DIR}
     
     mkdir -p "$mnt" && mount /dev/"${dev}"1 "$mnt"
     
-    # 写入fstab实现持久化
     uuid=$(blkid -s UUID -o value /dev/"${dev}"1)
     echo "UUID=$uuid $mnt ext4 defaults 0 2" >> /etc/fstab
     
@@ -457,7 +462,7 @@ partition_disk(){
   done
 }
 
-# Docker 安装
+# Docker 安装与部署（保持不变）
 install_docker(){
   if ! command -v curl &>/dev/null; then
     log "安装 curl..."
@@ -469,7 +474,6 @@ install_docker(){
     curl -fsSL https://get.docker.com | sh
     apt-get install -y docker-compose-plugin
     
-    # 添加用户到docker组
     local user=${SUDO_USER:-$USER}
     [[ -n "$user" ]] && usermod -aG docker "$user"
     
@@ -480,7 +484,6 @@ install_docker(){
   fi
 }
 
-# 部署容器
 deploy_containers(){
   if [[ ! -d "$BASE_DIR" || ! "$(mount | grep "$BASE_DIR")" ]]; then
     error "未检测到已挂载的存储设备，请先通过 4) 磁盘分区 & 挂载 配置存储"
@@ -492,7 +495,6 @@ deploy_containers(){
     apt-get update && apt-get install -y curl
   fi
   
-  # 检查docker-compose是否可用
   if ! command -v docker compose &>/dev/null; then
     error "未检测到 docker-compose-plugin，请先执行 6) 安装 Docker"
     return 1
@@ -515,7 +517,6 @@ deploy_containers(){
     esac
   done
   
-  # GitHub URL转换
   if [[ "$URL" =~ github\.com/.*/blob/.* ]]; then
     URL="${URL/\/blob\//\/raw\/}"
     log "已转换为 Raw URL: $URL"
@@ -532,7 +533,7 @@ deploy_containers(){
   log "容器部署完成"
 }
 
-# Docker 一键运维
+# Docker 一键运维（保持不变）
 docker_one_click(){
   while true; do
     echo -e "\n====== Docker 运维 ======"
@@ -558,7 +559,7 @@ docker_one_click(){
   done
 }
 
-# 系统更新
+# 系统更新与日志轮转（保持不变）
 update_system(){
   . /etc/os-release
   VERSION_ID=${VERSION_ID%%.*}
@@ -572,18 +573,14 @@ update_system(){
   log "系统更新完毕"
 }
 
-# 日志轮转（带自动清理设置）
 log_rotate(){
   local log_days
   
   while true; do
     echo -e "\n====== 日志清理设置 ======"
     read -e -rp "请输入日志保留天数 (1-7天，默认7天): " log_days
-    
-    # 处理用户输入，使用默认值如果为空
     log_days=${log_days:-$DEFAULT_LOG_DAYS}
     
-    # 验证输入是否为1-7之间的数字
     if [[ "$log_days" =~ ^[1-7]$ ]]; then
       break
     else
@@ -594,9 +591,7 @@ log_rotate(){
   log "正在清理${log_days}天前的容器日志..."
   for c in $(docker ps -a --format '{{.Names}}'); do
     f="/var/log/${c}.log"
-    # 保存当前日志
     docker logs "$c" &> "$f"
-    # 删除指定天数前的日志
     find "$f" -mtime +"$log_days" -delete
   done
   
@@ -605,7 +600,7 @@ log_rotate(){
 
 # 主菜单
 while true; do
-  echo -e "\n====== N100 AIO 初始化 v0.18 ======"
+  echo -e "\n====== N100 AIO 初始化 v0.19 ======"
   echo "1) 环境检测"
   echo "2) 网络管理"
   echo "3) SSH 管理"
