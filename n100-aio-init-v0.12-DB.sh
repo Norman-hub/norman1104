@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------- #
-# N100 All-in-One 交互式初始化脚本 v0.17 优化版
-# 优化点：修复磁盘信息显示逻辑，首次运行显示系统磁盘和未挂载磁盘，区分挂载状态
+# N100 All-in-One 交互式初始化脚本 v0.18 优化版
+# 优化点：默认挂载点改为/mnt/data，修复静态IP配置失败问题，增加DNS设置
 # ---------------------------------------------------------------------------- #
 
 set -euo pipefail
@@ -43,10 +43,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 [[ "${1:-}" == "-h" ]] && display_help && exit 0
 
-# 全局变量
-BASE_DIR="/mnt/usbdata"
+# 全局变量 - 默认挂载点修改为/mnt/data
+BASE_DIR="/mnt/data"
 COMPOSE_DIR="$BASE_DIR/docker/compose"
-MOUNTS=(/mnt/usbdata1 /mnt/usbdata2 /mnt/usbdata3)
+MOUNTS=(/mnt/data1 /mnt/data2 /mnt/data3)
 DEFAULT_COMPOSE_URL="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/docker-compose.yml"
 # 日志保留天数默认值
 DEFAULT_LOG_DAYS=7
@@ -63,7 +63,7 @@ MEDIA_DIRS=(
   "other"        # 其他
 )
 
-# 环境检测与系统信息展示（修复磁盘信息显示逻辑）
+# 环境检测与系统信息展示
 env_check(){
   # 基础系统信息
   . /etc/os-release
@@ -226,6 +226,8 @@ network_menu(){
         ip -brief addr show
         log "路由表:"
         ip route show
+        log "DNS 配置:"
+        cat /etc/resolv.conf | grep 'nameserver' || echo "未配置DNS"
         ;;
       2)
         network_config
@@ -241,6 +243,16 @@ network_menu(){
 }
 
 network_config(){
+  # 检查是否存在NetworkManager冲突
+  if systemctl is-active --quiet NetworkManager; then
+    warn "检测到NetworkManager正在运行，可能与网络配置冲突"
+    read -e -rp "是否临时停止NetworkManager? [y/N]: " stop_nm
+    if [[ "$stop_nm" =~ ^[Yy]$ ]]; then
+      systemctl stop NetworkManager
+      log "NetworkManager已停止"
+    fi
+  fi
+
   while true; do
     echo -e "\n网络配置选项："
     echo "1) DHCP (动态IP)"
@@ -253,11 +265,22 @@ network_config(){
         iface=$(ip -o link show | awk -F': ' '/state UP/ {print $2}' | head -1)
         [[ -z "$iface" ]] && { warn "无可用接口"; continue; }
         
+        # 生成DHCP配置（包含DNS）
         cat >"/etc/network/interfaces.d/$iface.cfg" <<EOF
 auto $iface
 iface $iface inet dhcp
+dns-nameservers 8.8.8.8 114.114.114.114
 EOF
-        systemctl restart networking && log "DHCP 配置应用完成"
+        # 尝试重启网络服务，增加错误处理
+        if systemctl restart networking; then
+          log "DHCP 配置应用完成"
+          log "新IP地址:"
+          ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+'
+        else
+          error "网络服务重启失败"
+          error "请查看日志: journalctl -xeu networking.service"
+          error "配置文件: /etc/network/interfaces.d/$iface.cfg"
+        fi
         ;;
       2)
         iface=$(ip -o link show | awk -F': ' '/state UP/ {print $2}' | head -1)
@@ -272,14 +295,30 @@ EOF
         if ! echo "$gtw" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
           warn "网关格式错误"; continue
         fi
+
+        # 增加DNS配置（解决配置失败主因）
+        read -e -rp "DNS服务器 (多个用空格分隔，默认: 8.8.8.8 114.114.114.114): " dns
+        dns=${dns:-"8.8.8.8 114.114.114.114"}
         
+        # 生成静态IP配置（包含完整网络参数）
         cat >"/etc/network/interfaces.d/$iface.cfg" <<EOF
 auto $iface
 iface $iface inet static
   address $sip
   gateway $gtw
+  netmask $(echo "$sip" | awk -F'/' '{print 32 - $2}')
+  dns-nameservers $dns
 EOF
-        systemctl restart networking && log "静态IP 配置应用完成"
+        # 尝试重启网络服务，增加错误处理
+        if systemctl restart networking; then
+          log "静态IP 配置应用完成"
+          log "配置信息:"
+          grep -v '^#' "/etc/network/interfaces.d/$iface.cfg"
+        else
+          error "网络服务重启失败"
+          error "请查看日志: journalctl -xeu networking.service"
+          error "配置文件: /etc/network/interfaces.d/$iface.cfg"
+        fi
         ;;
       3)
         return
@@ -370,7 +409,7 @@ configure_root_ssh(){
   log "SSH配置已更新：允许root密码登录"
 }
 
-# 磁盘分区 & 挂载
+# 磁盘分区 & 挂载（默认挂载点改为/mnt/data）
 partition_disk(){
   if ! command -v parted &>/dev/null; then
     log "安装 parted..."
@@ -403,7 +442,7 @@ partition_disk(){
     parted /dev/"$dev" --script mklabel gpt mkpart primary ext4 1MiB 100%
     mkfs.ext4 /dev/"${dev}"1
     
-    # 挂载点设置（默认使用BASE_DIR）
+    # 挂载点设置（默认使用/mnt/data）
     read -e -rp "请输入挂载点 (默认: $BASE_DIR): " mnt
     mnt=${mnt:-$BASE_DIR}
     
@@ -566,7 +605,7 @@ log_rotate(){
 
 # 主菜单
 while true; do
-  echo -e "\n====== N100 AIO 初始化 v0.17 ======"
+  echo -e "\n====== N100 AIO 初始化 v0.18 ======"
   echo "1) 环境检测"
   echo "2) 网络管理"
   echo "3) SSH 管理"
