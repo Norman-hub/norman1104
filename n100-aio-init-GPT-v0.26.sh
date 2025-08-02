@@ -4,7 +4,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 # 颜色定义
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m';  BLUE='\033[0;34m'; NC='\033[0m'
 log()   { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
@@ -15,29 +15,22 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-#---------------#
-# 本机信息显示 #
-#---------------#
+########## 本机信息显示 ##########
 show_system_info() {
-  echo -e "\n====== 本机信息 / System Info ======"
-  echo "主机名: $(hostname)"
-  if command -v lsb_release >/dev/null 2>&1; then
-    echo "OS: $(lsb_release -d | cut -f2-)"
-  else
-    . /etc/os-release && echo "OS: $PRETTY_NAME"
-  fi
-  echo "内存: $(free -h | awk '/^Mem:/ {print $2 \" total, \" $3 \" used, \" $4 \" free\"}')"
-  echo "CPU: $(lscpu | awk -F: '/Model name/ {print $2}')"
-  echo -e "\n磁盘使用情况:"
+  draw_line
+  echo -e "${BLUE}系统信息 / System Info:${NC}"
+  echo -e " 主机名   : $(hostname)"
+  echo -e " OS       : $(grep -oP '(?<=PRETTY_NAME=").*(?=")' /etc/os-release)"
+  echo -e " 内存     : $(free -h | awk '/^Mem:/ {print $2 " total, " $3 " used, " $4 " free"}')"
+  echo -e " CPU      : $(nproc) 核心 / cores ($(lscpu | grep 'Model name' | cut -d: -f2 | xargs))"
+  echo -e " 磁盘使用情况:"
   df -h --output=source,size,used,avail,target | sed '1s/^/设备        容量  已用  可用  挂载点\n/'
   echo -e "\n本机 IPv4:"
   ip -4 addr show scope global | awk '/inet/ {print $NF": "$2}'
-  echo "===================================\n"
+  draw_line
 }
 
-#----------------#
-# SSH 管理       #
-#----------------#
+########## SSH 管理 / SSH Management ##########
 ssh_auto_enable() {
   log "检测 SSH 服务状态..."
   if ! systemctl is-active ssh >/dev/null 2>&1; then
@@ -62,9 +55,7 @@ ssh_auto_enable() {
   log "SSH 管理完成"
 }
 
-#-----------------------#
-# 网络管理             #
-#-----------------------#
+########## 网络管理 / Network Management ##########
 list_interfaces() {
   mapfile -t ifs < <(ip -o -4 addr show | awk '{print $2}')
   echo "可用网络接口:"
@@ -152,9 +143,7 @@ network_menu() {
   done
 }
 
-#-----------------------#
-# 磁盘管理             #
-#-----------------------#
+########## 磁盘管理 / Disk Management ##########
 disk_status() {
   echo -e "\n磁盘状态 / Disk Status:"
   lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINT,LABEL | \
@@ -242,9 +231,7 @@ disk_menu() {
   done
 }
 
-#-----------------------#
-# Docker 管理          #
-#-----------------------#
+########## Docker 管理 / Docker Management ##########
 install_docker() {
   if command -v docker >/dev/null && command -v docker-compose >/dev/null; then
     log "已安装 Docker & docker-compose"
@@ -341,9 +328,7 @@ docker_menu() {
   done
 }
 
-#-----------------------#
-# 系统管理             #
-#-----------------------#
+########## 系统管理 / System Management ##########
 system_update() {
   apt-get update && apt-get upgrade -y && log "系统更新完成"
 }
@@ -381,9 +366,7 @@ system_menu() {
   done
 }
 
-#-----------------------#
-# 主流程                #
-#-----------------------#
+########## 主菜单 / Main Menu ##########
 show_system_info
 main_menu() {
   while true; do
