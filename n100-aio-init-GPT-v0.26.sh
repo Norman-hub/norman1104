@@ -29,7 +29,7 @@ show_system_info() {
   echo "内存: $(free -h | awk '/^Mem:/ {print $2 \" total, \" $3 \" used, \" $4 \" free\"}')"
   echo "CPU: $(lscpu | awk -F: '/Model name/ {print $2}')"
   echo -e "\n磁盘使用情况:"
-  df -h --output=source,size,used,avail,target | sed '1s/^/设备 容量 已用 可用 挂载点\n/'
+  df -h --output=source,size,used,avail,target | sed '1s/^/设备        容量  已用  可用  挂载点\n/'
   echo -e "\n本机 IPv4:"
   ip -4 addr show scope global | awk '/inet/ {print $NF": "$2}'
   echo "===================================\n"
@@ -349,7 +349,7 @@ system_update() {
 }
 
 script_self_upgrade() {
-  src_url="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/n100-aio-init-GPT4.1.sh"
+  src_url="https://raw.githubusercontent.com/norman110/N100/refs/heads/main/n100-aio-init-GPT-v0.26.sh"
   tmp="/tmp/$(basename "$0")"
   log "下载最新脚本..."
   curl -fsSL "$src_url" -o "$tmp"
