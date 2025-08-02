@@ -23,7 +23,7 @@ show_system_info() {
   echo -e " 内存  : $(free -h | awk '/^Mem:/ {print $2 " 总计, " $3 " 已用, " $4 " 空闲"}')"
   echo -e " CPU  : $(nproc)核 ($(lscpu | grep 'Model name' | cut -d: -f2 | xargs))"
   echo -e " 磁盘使用情况:"
-  df -h --output=source,size,used,avail,target | sed '1s/^/设备        容量  已用  可用  挂载点\n/'
+  df -h --output=source,size,used,avail,target | sed '1s/^/设备              容量  已用  可用  挂载点\n/'
   echo -e "\n本机 IPv4:"
   ip -4 addr show scope global | awk '/inet/ {print $NF": "$2}'
   echo -e "${BLUE}==========================================================${NC}"
