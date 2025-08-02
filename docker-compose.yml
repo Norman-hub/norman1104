@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # qBittorrent下载器 EE增强版 独立桥接网络（download_net）端口 8080
   qbittorrentee:
