@@ -18,7 +18,7 @@ fi
 ########## 本机信息显示 ##########
 show_system_info() {
   draw_line
-  echo -e "${BLUE}系统信息 / System Info:${NC}"
+  echo -e "${BLUE}=================系统信息 / System Info=================${NC}"
   echo -e " 主机名   : $(hostname)"
   echo -e " OS       : $(grep -oP '(?<=PRETTY_NAME=").*(?=")' /etc/os-release)"
   echo -e " 内存     : $(free -h | awk '/^Mem:/ {print $2 " total, " $3 " used, " $4 " free"}')"
