@@ -17,7 +17,6 @@ fi
 
 ########## 本机信息显示 ##########
 show_system_info() {
-  draw_line
   echo -e "${BLUE}=================系统信息 / System Info=================${NC}"
   echo -e " 主机名   : $(hostname)"
   echo -e " OS       : $(grep -oP '(?<=PRETTY_NAME=").*(?=")' /etc/os-release)"
@@ -27,7 +26,6 @@ show_system_info() {
   df -h --output=source,size,used,avail,target | sed '1s/^/设备        容量  已用  可用  挂载点\n/'
   echo -e "\n本机 IPv4:"
   ip -4 addr show scope global | awk '/inet/ {print $NF": "$2}'
-  draw_line
 }
 
 ########## SSH 管理 / SSH Management ##########
