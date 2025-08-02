@@ -48,6 +48,7 @@ services:
     networks:
       - proxy_net
     volumes:
+      - /mnt/data/docker/dashy/config/:/app/user-data/ #以防主机无目录conf.yml创建为目录
       - /mnt/data/docker/dashy/config/conf.yml:/app/user-data/conf.yml
     ports:
       - "8081:8080"
@@ -57,9 +58,9 @@ services:
     healthcheck:
       test: ['CMD', 'node', '/app/services/healthcheck']
       interval: 1m30s
-      timeout: 10s
+      timeout: 10秒
       retries: 3
-      start_period: 40s
+      start_period: 40秒
 
   # Glances 资源监控 (host 模式) 端口61208
   glances:
