@@ -58,9 +58,9 @@ services:
     healthcheck:
       test: ['CMD', 'node', '/app/services/healthcheck']
       interval: 1m30s
-      timeout: 10秒
+      timeout: 10s
       retries: 3
-      start_period: 40秒
+      start_period: 40s
 
   # Glances 资源监控 (host 模式) 端口61208
   glances:
